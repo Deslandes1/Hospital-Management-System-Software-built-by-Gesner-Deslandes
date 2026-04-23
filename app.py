@@ -85,7 +85,6 @@ def login_page():
             submit = st.form_submit_button("🔐 Sign In", use_container_width=True)
             
             if submit:
-                # Specific credentials check
                 if username_input == "Gesner" and password_input == "20082010" and role_input == "Admin":
                     st.session_state.authenticated = True
                     st.session_state.username = username_input
@@ -114,7 +113,8 @@ def main_dashboard():
             st.rerun()
         st.markdown("---")
         st.markdown("### 📋 Quick Actions")
-        st.page_link("app.py", label="🏠 Dashboard", icon="🏠")
+        # Removed problematic st.page_link line – no replacement needed
+        st.markdown("[🏠 Dashboard](#)")  # simple placeholder, does nothing
         st.markdown("---")
         st.caption("© 2026 GlobalInternet.py – built by Gesner Deslandes")
     
@@ -138,7 +138,6 @@ def main_dashboard():
         </div>
         """, unsafe_allow_html=True)
         
-        # Direct video preview from GitHub
         github_video_url = "https://raw.githubusercontent.com/Deslandes1/Hospital-Management-System-Software-built-by-Gesner-Deslandes/main/X.mp4"
         try:
             st.video(github_video_url, format="video/mp4", start_time=0)
@@ -146,7 +145,6 @@ def main_dashboard():
         except Exception as e:
             st.warning("⚠️ Video preview not available. Please watch the full introduction on YouTube by clicking the link below.")
         
-        # YouTube link
         st.markdown("""
         <div style="text-align: center; margin: 2rem 0;">
             <a href="https://youtu.be/QDnU1q64vvw?si=IjaPulUgwKG9n1QQ" target="_blank" style="background-color: #FF0000; color: white; padding: 10px 20px; text-decoration: none; border-radius: 30px; font-weight: bold;">

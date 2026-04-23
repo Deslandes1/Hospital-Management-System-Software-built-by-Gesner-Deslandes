@@ -11,10 +11,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ========== CUSTOM CSS FOR ADAPTABLE COLORS & READABILITY ==========
+# ========== CUSTOM CSS ==========
 st.markdown("""
 <style>
-    /* Main background and text */
     .stApp {
         background-color: #f4f7fc;
     }
@@ -42,24 +41,6 @@ st.markdown("""
         transform: translateY(-3px);
         box-shadow: 0 8px 16px rgba(0,0,0,0.1);
     }
-    .metric-card {
-        text-align: center;
-        background: #ffffff;
-        border-left: 5px solid #0077b6;
-    }
-    .logout-btn {
-        background-color: #e63946;
-        color: white;
-        border: none;
-        border-radius: 20px;
-        padding: 0.5rem 1rem;
-        width: 100%;
-        cursor: pointer;
-        font-weight: bold;
-    }
-    .logout-btn:hover {
-        background-color: #c1121f;
-    }
     .stButton>button {
         border-radius: 25px;
         background-color: #0077b6;
@@ -74,9 +55,6 @@ st.markdown("""
     h2, h3 {
         color: #023e8a;
     }
-    hr {
-        margin: 1rem 0;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -86,7 +64,7 @@ if "authenticated" not in st.session_state:
 if "username" not in st.session_state:
     st.session_state.username = ""
 if "role" not in st.session_state:
-    st.session_state.role = "Admin"  # default role
+    st.session_state.role = "Admin"
 
 # ========== LOGIN PAGE ==========
 def login_page():
@@ -107,11 +85,10 @@ def login_page():
             with col_a:
                 st.selectbox("👨‍⚕️ Role", ["Admin", "Doctor", "Nurse", "Billing Staff"], key="login_role")
             with col_b:
-                st.markdown("<br>", unsafe_allow_html=True)  # spacer
+                st.markdown("<br>", unsafe_allow_html=True)
             submit = st.form_submit_button("🔐 Sign In", use_container_width=True)
             
             if submit:
-                # Simple demo authentication – accept any non-empty username/password
                 if st.session_state.login_user and st.session_state.login_pass:
                     st.session_state.authenticated = True
                     st.session_state.username = st.session_state.login_user
@@ -129,7 +106,7 @@ def login_page():
 
 # ========== MAIN DASHBOARD ==========
 def main_dashboard():
-    # Sidebar with logout and role info
+    # Sidebar
     with st.sidebar:
         st.image("https://img.icons8.com/fluency/96/null/hospital.png", width=80)
         st.markdown(f"**Welcome, {st.session_state.username}**  \n👨‍⚕️ Role: **{st.session_state.role}**")
@@ -152,11 +129,40 @@ def main_dashboard():
     </div>
     """, unsafe_allow_html=True)
     
-    # Tabs for core modules
-    tabs = st.tabs(["📊 Dashboard Overview", "👤 Patient Management", "💰 Billing & Revenue", "💊 Pharmacy", "🔬 Laboratory", "📷 Radiology", "📦 Inventory", "📈 Reports"])
+    # Add Video Introduction Tab at the beginning
+    tabs = st.tabs(["📺 Video Introduction", "📊 Dashboard Overview", "👤 Patient Management", "💰 Billing & Revenue", "💊 Pharmacy", "🔬 Laboratory", "📷 Radiology", "📦 Inventory", "📈 Reports"])
     
-    # ---------- TAB 0: OVERVIEW ----------
+    # ---------- TAB 0: VIDEO INTRODUCTION ----------
     with tabs[0]:
+        st.markdown("""
+        <div class="card">
+            <h3>🎬 Introduction to Hospital Management System Software</h3>
+            <p>Watch this video to learn how our software can transform your healthcare operations.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Direct video preview from GitHub (if the file is accessible)
+        github_video_url = "https://raw.githubusercontent.com/Deslandes1/Hospital-Management-System-Software-built-by-Gesner-Deslandes/main/X.mp4"
+        try:
+            st.video(github_video_url, format="video/mp4", start_time=0)
+            st.caption("📽️ Preview of the Hospital Management System Software (GitHub)")
+
+        except Exception as e:
+            st.warning(f"⚠️ Video preview not available. Please watch the full introduction on YouTube by clicking the link below.")
+        
+        # YouTube link for the full video
+        st.markdown("""
+        <div style="text-align: center; margin: 2rem 0;">
+            <a href="https://youtu.be/QDnU1q64vvw?si=IjaPulUgwKG9n1QQ" target="_blank" style="background-color: #FF0000; color: white; padding: 10px 20px; text-decoration: none; border-radius: 30px; font-weight: bold;">
+                ▶️ Watch the Full Introduction on YouTube
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.info("📌 The YouTube video provides a complete walkthrough of all modules, including EMR, billing, pharmacy, laboratory, radiology, inventory, and enterprise reporting.")
+    
+    # ---------- TAB 1: OVERVIEW ----------
+    with tabs[1]:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("🩺 Total Patients Today", random.randint(120, 250), delta="+5%")
@@ -185,8 +191,8 @@ def main_dashboard():
             })
             st.bar_chart(dept_stats.set_index("Department"))
     
-    # ---------- TAB 1: PATIENT MANAGEMENT ----------
-    with tabs[1]:
+    # ---------- TAB 2: PATIENT MANAGEMENT ----------
+    with tabs[2]:
         st.subheader("👤 Patient Registration & EMR")
         with st.expander("➕ Register New Patient"):
             col1, col2 = st.columns(2)
@@ -211,8 +217,8 @@ def main_dashboard():
         st.dataframe(patients_df, use_container_width=True)
         st.caption("📌 Electronic Medical Records (EMR) – search, edit, and view full history.")
     
-    # ---------- TAB 2: BILLING ----------
-    with tabs[2]:
+    # ---------- TAB 3: BILLING ----------
+    with tabs[3]:
         st.subheader("💰 Billing & Revenue Cycle Management")
         col1, col2 = st.columns(2)
         with col1:
@@ -230,8 +236,8 @@ def main_dashboard():
             }
             st.dataframe(pd.DataFrame(inv_data), use_container_width=True)
     
-    # ---------- TAB 3: PHARMACY ----------
-    with tabs[3]:
+    # ---------- TAB 4: PHARMACY ----------
+    with tabs[4]:
         st.subheader("💊 Pharmacy Management")
         col1, col2 = st.columns(2)
         with col1:
@@ -248,8 +254,8 @@ def main_dashboard():
             })
             st.dataframe(stock_df, use_container_width=True)
     
-    # ---------- TAB 4: LABORATORY ----------
-    with tabs[4]:
+    # ---------- TAB 5: LABORATORY ----------
+    with tabs[5]:
         st.subheader("🔬 Laboratory Integration")
         test = st.selectbox("Order Lab Test", ["Complete Blood Count", "Lipid Panel", "Liver Function Test", "Urinalysis"])
         patient_test = st.text_input("Patient MRN / Name", "HOSP-1001")
@@ -265,16 +271,16 @@ def main_dashboard():
         }
         st.dataframe(pd.DataFrame(lab_data), use_container_width=True)
     
-    # ---------- TAB 5: RADIOLOGY ----------
-    with tabs[5]:
+    # ---------- TAB 6: RADIOLOGY ----------
+    with tabs[6]:
         st.subheader("📷 Radiology & Imaging")
         scan = st.radio("Select Imaging Type", ["X-Ray", "CT Scan", "MRI", "Ultrasound"], horizontal=True)
         if st.button("Schedule Scan"):
             st.success(f"✅ {scan} scheduled for patient. Report will be sent to referring doctor.")
         st.info("📌 HL7 / FHIR interoperability supported for PACS integration.")
     
-    # ---------- TAB 6: INVENTORY ----------
-    with tabs[6]:
+    # ---------- TAB 7: INVENTORY ----------
+    with tabs[7]:
         st.subheader("📦 Inventory & Financial Management")
         inv_items = pd.DataFrame({
             "Item": ["Surgical Gloves", "Syringes", "Masks", "IV Fluids"],
@@ -284,13 +290,12 @@ def main_dashboard():
         st.dataframe(inv_items, use_container_width=True)
         st.caption("🔄 Auto reorder alerts configured for low stock.")
     
-    # ---------- TAB 7: REPORTS ----------
-    with tabs[7]:
+    # ---------- TAB 8: REPORTS ----------
+    with tabs[8]:
         st.subheader("📈 Enterprise Reporting")
         report_type = st.selectbox("Select Report", ["Daily Revenue", "Patient Visits", "Pharmacy Sales", "Department Performance"])
         if st.button("Generate Report"):
             st.success(f"📊 {report_type} report generated. Download as PDF/CSV available.")
-        # Sample chart
         df_report = pd.DataFrame({
             "Day": ["Mon", "Tue", "Wed", "Thu", "Fri"],
             "Revenue": [12500, 14800, 13200, 16700, 18900]

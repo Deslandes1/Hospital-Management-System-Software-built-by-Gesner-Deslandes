@@ -79,27 +79,24 @@ def login_page():
         """, unsafe_allow_html=True)
         
         with st.form("login_form"):
-            st.text_input("👤 Username", key="login_user")
-            st.text_input("🔒 Password", type="password", key="login_pass")
-            col_a, col_b = st.columns([1,1])
-            with col_a:
-                st.selectbox("👨‍⚕️ Role", ["Admin", "Doctor", "Nurse", "Billing Staff"], key="login_role")
-            with col_b:
-                st.markdown("<br>", unsafe_allow_html=True)
+            username_input = st.text_input("👤 Username", key="login_user")
+            password_input = st.text_input("🔒 Password", type="password", key="login_pass")
+            role_input = st.selectbox("👨‍⚕️ Role", ["Admin", "Doctor", "Nurse", "Billing Staff"], key="login_role")
             submit = st.form_submit_button("🔐 Sign In", use_container_width=True)
             
             if submit:
-                if st.session_state.login_user and st.session_state.login_pass:
+                # Specific credentials check
+                if username_input == "Gesner" and password_input == "20082010" and role_input == "Admin":
                     st.session_state.authenticated = True
-                    st.session_state.username = st.session_state.login_user
-                    st.session_state.role = st.session_state.login_role
+                    st.session_state.username = username_input
+                    st.session_state.role = role_input
                     st.rerun()
                 else:
-                    st.error("❌ Please enter both username and password.")
+                    st.error("❌ Invalid credentials. Only Admin (Gesner / 20082010) can access.")
         
         st.markdown("""
         <div style="text-align: center; margin-top: 2rem;">
-            <p>🩺 <strong>Demo credentials:</strong> any username / any password</p>
+            <p>🩺 <strong>Authorized access only:</strong> Gesner / 20082010 / Admin</p>
             <p>🏥 Integrated EMR | Billing | Pharmacy | Lab | Radiology</p>
         </div>
         """, unsafe_allow_html=True)
@@ -129,7 +126,7 @@ def main_dashboard():
     </div>
     """, unsafe_allow_html=True)
     
-    # Add Video Introduction Tab at the beginning
+    # Tabs
     tabs = st.tabs(["📺 Video Introduction", "📊 Dashboard Overview", "👤 Patient Management", "💰 Billing & Revenue", "💊 Pharmacy", "🔬 Laboratory", "📷 Radiology", "📦 Inventory", "📈 Reports"])
     
     # ---------- TAB 0: VIDEO INTRODUCTION ----------
@@ -141,16 +138,15 @@ def main_dashboard():
         </div>
         """, unsafe_allow_html=True)
         
-        # Direct video preview from GitHub (if the file is accessible)
+        # Direct video preview from GitHub
         github_video_url = "https://raw.githubusercontent.com/Deslandes1/Hospital-Management-System-Software-built-by-Gesner-Deslandes/main/X.mp4"
         try:
             st.video(github_video_url, format="video/mp4", start_time=0)
             st.caption("📽️ Preview of the Hospital Management System Software (GitHub)")
-
         except Exception as e:
-            st.warning(f"⚠️ Video preview not available. Please watch the full introduction on YouTube by clicking the link below.")
+            st.warning("⚠️ Video preview not available. Please watch the full introduction on YouTube by clicking the link below.")
         
-        # YouTube link for the full video
+        # YouTube link
         st.markdown("""
         <div style="text-align: center; margin: 2rem 0;">
             <a href="https://youtu.be/QDnU1q64vvw?si=IjaPulUgwKG9n1QQ" target="_blank" style="background-color: #FF0000; color: white; padding: 10px 20px; text-decoration: none; border-radius: 30px; font-weight: bold;">

@@ -40,11 +40,6 @@ st.markdown("""
         padding: 1.2rem;
         box-shadow: 0 4px 8px rgba(0,0,0,0.05);
         margin-bottom: 1rem;
-        transition: all 0.2s;
-    }
-    .card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
     }
     .stButton>button {
         border-radius: 25px;
@@ -79,7 +74,34 @@ if "username" not in st.session_state:
 if "role" not in st.session_state:
     st.session_state.role = "Admin"
 if "language" not in st.session_state:
-    st.session_state.language = "en"  # default English
+    st.session_state.language = "en"
+if "patients" not in st.session_state:
+    # Preload some demo patients so the AI has data even before first registration
+    st.session_state.patients = [
+        {"mrn": "HOSP-1001", "name": "Emily Clark", "age": 34, "gender": "Female", "phone": "555-0101", "address": "123 Main St", "last_visit": "2026-04-20"},
+        {"mrn": "HOSP-1002", "name": "James Brown", "age": 58, "gender": "Male", "phone": "555-0102", "address": "456 Oak Ave", "last_visit": "2026-04-19"},
+        {"mrn": "HOSP-1003", "name": "Sophia Lee", "age": 22, "gender": "Female", "phone": "555-0103", "address": "789 Pine Rd", "last_visit": "2026-04-18"}
+    ]
+if "invoices" not in st.session_state:
+    st.session_state.invoices = [
+        {"invoice": "INV-101", "patient": "Emily Clark", "amount": 450, "status": "Paid"},
+        {"invoice": "INV-102", "patient": "James Brown", "amount": 1200, "status": "Pending"},
+        {"invoice": "INV-103", "patient": "Sophia Lee", "amount": 780, "status": "Paid"}
+    ]
+if "lab_orders" not in st.session_state:
+    st.session_state.lab_orders = [
+        {"patient": "Emily Clark", "test": "CBC", "status": "Completed"},
+        {"patient": "James Brown", "test": "Lipid Panel", "status": "Pending"}
+    ]
+# For demo, we'll keep some random stats that refresh on each run but are consistent within a session
+if "hospital_stats" not in st.session_state:
+    st.session_state.hospital_stats = {
+        "total_patients_today": random.randint(120, 250),
+        "active_beds": random.randint(80, 150),
+        "today_revenue": random.randint(15000, 35000),
+        "lab_tests_pending": random.randint(10, 40)
+    }
+# But we'll update them occasionally; for now it's fine.
 
 # ========== GROQ CLIENT ==========
 if "GROQ_API_KEY" not in st.secrets:
@@ -87,7 +109,8 @@ if "GROQ_API_KEY" not in st.secrets:
     st.stop()
 groq_client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# ========== TRANSLATION DICTIONARIES (same as original, but added AI Diagnostic keys) ==========
+# ========== TRANSLATION DICTIONARIES ==========
+# (For brevity, only English is shown; you can add Spanish/French later)
 lang_en = {
     "app_title": "🏥 Hospital Management System Software",
     "app_subtitle": "built by Gesner Deslandes",
@@ -192,7 +215,7 @@ lang_en = {
     "spanish": "Español",
     "french": "Français",
     "ai_diagnostic_title": "🤖 AI Diagnostic Assistant",
-    "ai_diagnostic_desc": "Ask any clinical or operational question about patients, inventory, billing, or lab results. The AI will provide insights based on hospital data.",
+    "ai_diagnostic_desc": "Ask any clinical or operational question about patients, inventory, billing, or lab results. The AI will provide insights based on actual hospital data.",
     "ai_question_label": "💬 Your question:",
     "ai_ask_button": "Ask AI",
     "ai_thinking": "🧠 AI is analyzing your question and hospital data...",
@@ -200,24 +223,11 @@ lang_en = {
     "ai_error": "⚠️ AI service error. Please try again later."
 }
 
-# Spanish and French dictionaries (same as original but can be extended; for brevity I'll include only English here, but you can copy from previous version)
-# For brevity, we define only English; but the language selector will work if you add the translations.
-# Since the original app had full translations, we'll keep them but not list them again for space. 
-# In deployment, use the complete original translations plus the new keys.
-# For this response, I'll assume the user will copy from original and add AI keys.
-
-# ========== HELPER FUNCTIONS ==========
 def get_text(key, lang=None):
     if lang is None:
         lang = st.session_state.language
-    # Simplified: only English for AI tab; user can add translations later
-    if lang == "es":
-        # For simplicity, return English for new keys; user should add Spanish translations.
-        return lang_en.get(key, key)
-    elif lang == "fr":
-        return lang_en.get(key, key)
-    else:
-        return lang_en.get(key, key)
+    # For simplicity, only English in this version
+    return lang_en.get(key, key)
 
 def language_selector():
     lang_options = {"en": get_text("english"), "es": get_text("spanish"), "fr": get_text("french")}
@@ -235,28 +245,37 @@ def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
     
-    # Collect some context from session state? We can use dummy data for demonstration.
-    # In real app, you'd query actual database. Here we'll provide a summary of hospital stats.
+    # Build a realistic summary from actual session data
+    patient_list = "\n".join([f"- {p['name']} (MRN: {p['mrn']}, Age: {p['age']})" for p in st.session_state.patients])
+    patient_count = len(st.session_state.patients)
+    invoice_summary = "\n".join([f"- {inv['patient']}: ${inv['amount']} ({inv['status']})" for inv in st.session_state.invoices])
+    lab_summary = "\n".join([f"- {lab['patient']}: {lab['test']} ({lab['status']})" for lab in st.session_state.lab_orders])
+    stats = st.session_state.hospital_stats
+    
     hospital_summary = f"""
-    Hospital Statistics Summary:
-    - Total patients today: {random.randint(120, 250)}
-    - Active beds: {random.randint(80, 150)} / 200
-    - Today's revenue: ${random.randint(15000, 35000):,}
-    - Lab tests pending: {random.randint(10, 40)}
-    - Pharmacy stock alerts: Paracetamol low, Insulin reorder needed.
-    - Recent patients: Emily Clark (MRN HOSP-1001), James Brown (MRN HOSP-1002), Sophia Lee (MRN HOSP-1003)
+    **Actual Hospital Data (from this software):**
+    - Number of registered patients: {patient_count}
+    - Patient details:
+    {patient_list if patient_count > 0 else "No patients registered yet."}
+    - Total patients today (including walk‑ins): {stats['total_patients_today']}
+    - Active beds: {stats['active_beds']} / 200
+    - Today's revenue: ${stats['today_revenue']:,}
+    - Lab tests pending: {stats['lab_tests_pending']}
+    - Recent invoices:
+    {invoice_summary if st.session_state.invoices else "No invoices."}
+    - Lab orders:
+    {lab_summary if st.session_state.lab_orders else "No lab orders."}
     """
     
     user_question = st.text_area(get_text("ai_question_label"), height=100,
-                                 placeholder="Example: What is the most common diagnosis in the cardiology department? or Should we reorder insulin?")
+                                 placeholder="Example: How many patients are registered? or What is the total revenue from pending invoices?")
     
     if st.button(get_text("ai_ask_button"), key="ai_ask"):
         if not user_question.strip():
             st.warning("Please enter a question.")
         else:
             with st.spinner(get_text("ai_thinking")):
-                # Build prompt with hospital context
-                full_prompt = f"""You are an AI diagnostic assistant for a hospital management system. Use the following hospital data to answer the question. Be concise, helpful, and clinical where appropriate.
+                full_prompt = f"""You are an AI diagnostic assistant for a hospital management system. Use the following actual data from the software to answer the question accurately. If the question asks about number of patients, use the registered patient count. Be concise, helpful, and clinical where appropriate.
 
 Hospital Data:
 {hospital_summary}
@@ -323,7 +342,6 @@ def main_dashboard():
         st.markdown("---")
         language_selector()
         st.markdown("---")
-        # Global Security Shield badge
         st.markdown("### 🛡️ Global Security Shield active")
         st.markdown('<div class="security-badge">🔐 End‑to‑end encryption active</div>', unsafe_allow_html=True)
         st.caption("All data is secured and anonymized")
@@ -345,7 +363,6 @@ def main_dashboard():
     </div>
     """, unsafe_allow_html=True)
     
-    # Updated tabs: added AI Diagnostic as the last tab
     tabs = st.tabs([
         get_text("tab_video"),
         get_text("tab_overview"),
@@ -382,17 +399,18 @@ def main_dashboard():
         """, unsafe_allow_html=True)
         st.info(get_text("youtube_info"))
     
-    # ---------- TAB 1: OVERVIEW (unchanged) ----------
+    # ---------- TAB 1: OVERVIEW ----------
     with tabs[1]:
+        stats = st.session_state.hospital_stats
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric(get_text("total_patients"), random.randint(120, 250), delta="+5%")
+            st.metric(get_text("total_patients"), stats['total_patients_today'], delta="+5%")
         with col2:
-            st.metric(get_text("active_beds"), f"{random.randint(80, 150)} / 200", delta="Occupancy")
+            st.metric(get_text("active_beds"), f"{stats['active_beds']} / 200", delta="Occupancy")
         with col3:
-            st.metric(get_text("today_revenue"), f"${random.randint(15000, 35000):,}", delta="+12%")
+            st.metric(get_text("today_revenue"), f"${stats['today_revenue']:,}", delta="+12%")
         with col4:
-            st.metric(get_text("lab_tests_pending"), random.randint(10, 40), delta="-2")
+            st.metric(get_text("lab_tests_pending"), stats['lab_tests_pending'], delta="-2")
         st.markdown("---")
         col_left, col_right = st.columns(2)
         with col_left:
@@ -407,7 +425,7 @@ def main_dashboard():
                                        get_text("patient_col"): [87, 42, 23, 15]})
             st.bar_chart(dept_stats.set_index("Department"))
     
-    # ---------- TAB 2: PATIENT MANAGEMENT (unchanged) ----------
+    # ---------- TAB 2: PATIENT MANAGEMENT ----------
     with tabs[2]:
         st.subheader(get_text("patient_registration"))
         with st.expander(get_text("register_new")):
@@ -421,36 +439,49 @@ def main_dashboard():
                 address = st.text_area(get_text("address"))
             if st.button(get_text("register_btn")):
                 mrn = f"HOSP-{random.randint(10000,99999)}"
+                new_patient = {
+                    "mrn": mrn,
+                    "name": name,
+                    "age": age,
+                    "gender": gender,
+                    "phone": phone,
+                    "address": address,
+                    "last_visit": datetime.date.today().isoformat()
+                }
+                st.session_state.patients.append(new_patient)
                 st.success(get_text("register_success").format(name=name, mrn=mrn))
+                st.rerun()
         st.markdown("---")
         st.subheader(get_text("recent_patients"))
-        patients_df = pd.DataFrame({
-            get_text("mrn_col"): ["HOSP-1001", "HOSP-1002", "HOSP-1003"],
-            get_text("name_col"): ["Emily Clark", "James Brown", "Sophia Lee"],
-            get_text("age_col"): [34, 58, 22],
-            get_text("last_visit_col"): ["2026-04-20", "2026-04-19", "2026-04-18"]
-        })
-        st.dataframe(patients_df, use_container_width=True)
+        if st.session_state.patients:
+            patients_df = pd.DataFrame(st.session_state.patients)
+            # Select columns to display
+            display_cols = ["mrn", "name", "age", "last_visit"]
+            st.dataframe(patients_df[display_cols], use_container_width=True)
+        else:
+            st.info("No patients registered yet. Use the form above to add patients.")
         st.caption(get_text("emr_note"))
     
-    # ---------- TAB 3: BILLING (unchanged) ----------
+    # ---------- TAB 3: BILLING ----------
     with tabs[3]:
         st.subheader(get_text("billing_title"))
         col1, col2 = st.columns(2)
         with col1:
-            bill_patient = st.selectbox(get_text("select_patient"), ["Emily Clark (HOSP-1001)", "James Brown (HOSP-1002)", "Sophia Lee (HOSP-1003)"])
+            patient_names = [p["name"] for p in st.session_state.patients] if st.session_state.patients else ["No patients"]
+            bill_patient = st.selectbox(get_text("select_patient"), patient_names)
             amount = st.number_input(get_text("bill_amount"), min_value=0, step=10)
             if st.button(get_text("generate_bill")):
+                inv_num = f"INV-{random.randint(200,999)}"
+                st.session_state.invoices.append({"invoice": inv_num, "patient": bill_patient, "amount": amount, "status": "Pending"})
                 st.success(get_text("bill_success").format(patient=bill_patient, amount=amount))
         with col2:
             st.subheader(get_text("recent_invoices"))
-            inv_data = {get_text("invoice_col"): ["INV-101", "INV-102", "INV-103"],
-                        get_text("patient_col"): ["Emily Clark", "James Brown", "Sophia Lee"],
-                        get_text("amount_col"): [450, 1200, 780],
-                        get_text("status_col"): ["Paid", "Pending", "Paid"]}
-            st.dataframe(pd.DataFrame(inv_data), use_container_width=True)
+            if st.session_state.invoices:
+                st.dataframe(pd.DataFrame(st.session_state.invoices), use_container_width=True)
+            else:
+                st.info("No invoices yet.")
     
-    # ---------- TAB 4: PHARMACY (unchanged) ----------
+    # ---------- TAB 4: PHARMACY ----------
     with tabs[4]:
         st.subheader(get_text("pharmacy_title"))
         col1, col2 = st.columns(2)
@@ -466,21 +497,23 @@ def main_dashboard():
                                      get_text("reorder_level_col"): [100, 50, 30]})
             st.dataframe(stock_df, use_container_width=True)
     
-    # ---------- TAB 5: LABORATORY (unchanged) ----------
+    # ---------- TAB 5: LABORATORY ----------
     with tabs[5]:
         st.subheader(get_text("lab_title"))
         test = st.selectbox(get_text("order_lab_test"), ["Complete Blood Count", "Lipid Panel", "Liver Function Test", "Urinalysis"])
-        patient_test = st.text_input(get_text("patient_mrn"), "HOSP-1001")
+        patient_names = [p["name"] for p in st.session_state.patients] if st.session_state.patients else ["No patients"]
+        patient_test = st.selectbox(get_text("patient_mrn"), patient_names)
         if st.button(get_text("order_test_btn")):
+            st.session_state.lab_orders.append({"patient": patient_test, "test": test, "status": "Pending"})
             st.warning(get_text("order_test_msg").format(test=test, patient=patient_test))
         st.markdown("---")
         st.subheader(get_text("recent_lab_results"))
-        lab_data = {get_text("name_col"): ["Emily Clark", "James Brown"],
-                    get_text("test_col"): ["CBC", "Lipid Panel"],
-                    get_text("status_lab_col"): ["Completed", "Pending"]}
-        st.dataframe(pd.DataFrame(lab_data), use_container_width=True)
+        if st.session_state.lab_orders:
+            st.dataframe(pd.DataFrame(st.session_state.lab_orders), use_container_width=True)
+        else:
+            st.info("No lab orders yet.")
     
-    # ---------- TAB 6: RADIOLOGY (unchanged) ----------
+    # ---------- TAB 6: RADIOLOGY ----------
     with tabs[6]:
         st.subheader(get_text("radiology_title"))
         scan = st.radio(get_text("select_imaging"), ["X-Ray", "CT Scan", "MRI", "Ultrasound"], horizontal=True)
@@ -488,7 +521,7 @@ def main_dashboard():
             st.success(get_text("scan_success").format(scan=scan))
         st.info(get_text("interop_note"))
     
-    # ---------- TAB 7: INVENTORY (unchanged) ----------
+    # ---------- TAB 7: INVENTORY ----------
     with tabs[7]:
         st.subheader(get_text("inventory_title"))
         inv_items = pd.DataFrame({get_text("item_col"): ["Surgical Gloves", "Syringes", "Masks", "IV Fluids"],
@@ -497,7 +530,7 @@ def main_dashboard():
         st.dataframe(inv_items, use_container_width=True)
         st.caption(get_text("reorder_note"))
     
-    # ---------- TAB 8: REPORTS (unchanged) ----------
+    # ---------- TAB 8: REPORTS ----------
     with tabs[8]:
         st.subheader(get_text("reports_title"))
         report_type = st.selectbox(get_text("select_report"), ["Daily Revenue", "Patient Visits", "Pharmacy Sales", "Department Performance"])
@@ -507,7 +540,7 @@ def main_dashboard():
                                   get_text("revenue_col"): [12500, 14800, 13200, 16700, 18900]})
         st.line_chart(df_report.set_index(get_text("day_col")))
     
-    # ---------- TAB 9: AI DIAGNOSTIC ASSISTANT (NEW) ----------
+    # ---------- TAB 9: AI DIAGNOSTIC ASSISTANT ----------
     with tabs[9]:
         ai_diagnostic()
 

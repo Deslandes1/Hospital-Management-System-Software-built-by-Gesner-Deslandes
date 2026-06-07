@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 import datetime
 import random
+import re
 from groq import Groq
+import io
+from docx import Document
 
 # ========== PAGE CONFIGURATION ==========
 st.set_page_config(
@@ -15,13 +18,8 @@ st.set_page_config(
 # ========== CUSTOM CSS (LIGHT BLUE THEME) ==========
 st.markdown("""
 <style>
-    .stApp {
-        background-color: #e6f0ff;
-    }
-    [data-testid="stSidebar"] {
-        background-color: #b8d4ff;
-        border-right: 1px solid #90b8e0;
-    }
+    .stApp { background-color: #e6f0ff; }
+    [data-testid="stSidebar"] { background-color: #b8d4ff; border-right: 1px solid #90b8e0; }
     .main-header {
         background: linear-gradient(90deg, #4a90e2, #2c5f9a);
         padding: 1rem;
@@ -30,10 +28,7 @@ st.markdown("""
         text-align: center;
         margin-bottom: 1.5rem;
     }
-    .main-header h1 {
-        margin: 0;
-        font-size: 2rem;
-    }
+    .main-header h1 { margin: 0; font-size: 2rem; }
     .card {
         background-color: white;
         border-radius: 15px;
@@ -46,12 +41,8 @@ st.markdown("""
         background-color: #2c5f9a;
         color: white;
     }
-    .stButton>button:hover {
-        background-color: #1e3f6b;
-    }
-    h2, h3 {
-        color: #1e3f6b;
-    }
+    .stButton>button:hover { background-color: #1e3f6b; }
+    h2, h3 { color: #1e3f6b; }
     .security-badge {
         background-color: #d9e8ff;
         border-radius: 30px;
@@ -76,7 +67,6 @@ if "role" not in st.session_state:
 if "language" not in st.session_state:
     st.session_state.language = "en"
 if "patients" not in st.session_state:
-    # Preload some demo patients so the AI has data even before first registration
     st.session_state.patients = [
         {"mrn": "HOSP-1001", "name": "Emily Clark", "age": 34, "gender": "Female", "phone": "555-0101", "address": "123 Main St", "last_visit": "2026-04-20"},
         {"mrn": "HOSP-1002", "name": "James Brown", "age": 58, "gender": "Male", "phone": "555-0102", "address": "456 Oak Ave", "last_visit": "2026-04-19"},
@@ -93,7 +83,6 @@ if "lab_orders" not in st.session_state:
         {"patient": "Emily Clark", "test": "CBC", "status": "Completed"},
         {"patient": "James Brown", "test": "Lipid Panel", "status": "Pending"}
     ]
-# For demo, we'll keep some random stats that refresh on each run but are consistent within a session
 if "hospital_stats" not in st.session_state:
     st.session_state.hospital_stats = {
         "total_patients_today": random.randint(120, 250),
@@ -101,7 +90,8 @@ if "hospital_stats" not in st.session_state:
         "today_revenue": random.randint(15000, 35000),
         "lab_tests_pending": random.randint(10, 40)
     }
-# But we'll update them occasionally; for now it's fine.
+if "guidelines_text" not in st.session_state:
+    st.session_state.guidelines_text = ""
 
 # ========== GROQ CLIENT ==========
 if "GROQ_API_KEY" not in st.secrets:
@@ -109,8 +99,7 @@ if "GROQ_API_KEY" not in st.secrets:
     st.stop()
 groq_client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# ========== TRANSLATION DICTIONARIES ==========
-# (For brevity, only English is shown; you can add Spanish/French later)
+# ========== TRANSLATION (ENGLISH ONLY FOR BREVITY) ==========
 lang_en = {
     "app_title": "🏥 Hospital Management System Software",
     "app_subtitle": "built by Gesner Deslandes",
@@ -215,18 +204,19 @@ lang_en = {
     "spanish": "Español",
     "french": "Français",
     "ai_diagnostic_title": "🤖 AI Diagnostic Assistant",
-    "ai_diagnostic_desc": "Ask any clinical or operational question about patients, inventory, billing, or lab results. The AI will provide insights based on actual hospital data.",
+    "ai_diagnostic_desc": "Ask any clinical or operational question about patients, inventory, billing, or lab results. The AI will provide insights based on actual hospital data. You can also ask if a patient is ready for discharge. **Hospital guidelines (if uploaded) will be used to answer policy-related questions.**",
     "ai_question_label": "💬 Your question:",
     "ai_ask_button": "Ask AI",
     "ai_thinking": "🧠 AI is analyzing your question and hospital data...",
     "ai_response_title": "💡 AI Diagnostic Insight",
-    "ai_error": "⚠️ AI service error. Please try again later."
+    "ai_error": "⚠️ AI service error. Please try again later.",
+    "upload_guidelines": "📄 Upload Hospital Guidelines (Word document)",
+    "clear_guidelines": "🗑️ Clear Guidelines",
+    "guidelines_uploaded": "✅ Guidelines loaded from {filename}",
+    "guidelines_cleared": "Guidelines cleared."
 }
 
 def get_text(key, lang=None):
-    if lang is None:
-        lang = st.session_state.language
-    # For simplicity, only English in this version
     return lang_en.get(key, key)
 
 def language_selector():
@@ -241,19 +231,64 @@ def language_selector():
         st.session_state.language = selected_lang
         st.rerun()
 
+# ========== PATIENT STATUS FOR DISCHARGE ==========
+def get_patient_status(patient_name):
+    patient = next((p for p in st.session_state.patients if p["name"] == patient_name), None)
+    if not patient:
+        return None
+    labs = [lab for lab in st.session_state.lab_orders if lab["patient"] == patient_name]
+    invoices = [inv for inv in st.session_state.invoices if inv["patient"] == patient_name]
+    last_visit = datetime.datetime.strptime(patient.get("last_visit", "2026-01-01"), "%Y-%m-%d")
+    days_since_last = (datetime.datetime.now() - last_visit).days
+    pending_labs = [lab for lab in labs if lab["status"] == "Pending"]
+    all_labs_completed = len(pending_labs) == 0 and len(labs) > 0
+    unpaid_invoices = [inv for inv in invoices if inv["status"] != "Paid"]
+    all_bills_paid = len(unpaid_invoices) == 0
+    ready_for_discharge = all_labs_completed and all_bills_paid and days_since_last >= 1
+    return {
+        "name": patient_name,
+        "labs": labs,
+        "invoices": invoices,
+        "days_since_last": days_since_last,
+        "all_labs_completed": all_labs_completed,
+        "all_bills_paid": all_bills_paid,
+        "ready_for_discharge": ready_for_discharge,
+        "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
+    }
+
+# ========== AI DIAGNOSTIC ==========
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
     
-    # Build a realistic summary from actual session data
-    patient_list = "\n".join([f"- {p['name']} (MRN: {p['mrn']}, Age: {p['age']})" for p in st.session_state.patients])
+    # ---- Guidelines upload section ----
+    st.markdown("---")
+    uploaded_file = st.file_uploader(get_text("upload_guidelines"), type=["docx"])
+    if uploaded_file is not None:
+        try:
+            doc = Document(io.BytesIO(uploaded_file.read()))
+            full_text = "\n".join([para.text for para in doc.paragraphs])
+            st.session_state.guidelines_text = full_text
+            st.success(get_text("guidelines_uploaded").format(filename=uploaded_file.name))
+        except Exception as e:
+            st.error(f"Error reading Word document: {e}")
+    if st.session_state.guidelines_text and st.button(get_text("clear_guidelines")):
+        st.session_state.guidelines_text = ""
+        st.success(get_text("guidelines_cleared"))
+        st.rerun()
+    if st.session_state.guidelines_text:
+        st.info(f"📋 Guidelines loaded (first 300 chars): {st.session_state.guidelines_text[:300]}...")
+    st.markdown("---")
+    
+    # Build summary from current session data
+    patient_list = "\n".join([f"- {p['name']} (MRN: {p['mrn']}, Age: {p['age']}, Last visit: {p['last_visit']})" for p in st.session_state.patients])
     patient_count = len(st.session_state.patients)
+    lab_summary = "\n".join([f"- {lab['patient']}: {lab['test']} – {lab['status']}" for lab in st.session_state.lab_orders])
     invoice_summary = "\n".join([f"- {inv['patient']}: ${inv['amount']} ({inv['status']})" for inv in st.session_state.invoices])
-    lab_summary = "\n".join([f"- {lab['patient']}: {lab['test']} ({lab['status']})" for lab in st.session_state.lab_orders])
     stats = st.session_state.hospital_stats
     
     hospital_summary = f"""
-    **Actual Hospital Data (from this software):**
+    Actual Hospital Data (from this software):
     - Number of registered patients: {patient_count}
     - Patient details:
     {patient_list if patient_count > 0 else "No patients registered yet."}
@@ -261,47 +296,80 @@ def ai_diagnostic():
     - Active beds: {stats['active_beds']} / 200
     - Today's revenue: ${stats['today_revenue']:,}
     - Lab tests pending: {stats['lab_tests_pending']}
-    - Recent invoices:
-    {invoice_summary if st.session_state.invoices else "No invoices."}
-    - Lab orders:
+    - Lab orders (with status):
     {lab_summary if st.session_state.lab_orders else "No lab orders."}
+    - Invoices (with status):
+    {invoice_summary if st.session_state.invoices else "No invoices."}
+    - No information about doctors is available in the system.
     """
     
+    guidelines_section = ""
+    if st.session_state.guidelines_text:
+        guidelines_section = f"""
+        Hospital Guidelines (from uploaded Word document):
+        {st.session_state.guidelines_text}
+        """
+    
     user_question = st.text_area(get_text("ai_question_label"), height=100,
-                                 placeholder="Example: How many patients are registered? or What is the total revenue from pending invoices?")
+                                 placeholder="Example: Is Emily Clark ready to go home? or How many doctors work here? or According to guidelines, what is the protocol for patient discharge?")
     
     if st.button(get_text("ai_ask_button"), key="ai_ask"):
         if not user_question.strip():
             st.warning("Please enter a question.")
         else:
-            with st.spinner(get_text("ai_thinking")):
-                full_prompt = f"""You are an AI diagnostic assistant for a hospital management system. Use the following actual data from the software to answer the question accurately. If the question asks about number of patients, use the registered patient count. Be concise, helpful, and clinical where appropriate.
+            # Check for discharge question about a specific patient
+            patient_name_match = None
+            for p in st.session_state.patients:
+                if p["name"].lower() in user_question.lower():
+                    patient_name_match = p["name"]
+                    break
+            
+            if patient_name_match and ("discharge" in user_question.lower() or "go home" in user_question.lower() or "ready" in user_question.lower()):
+                status = get_patient_status(patient_name_match)
+                if status:
+                    st.markdown(f"### {get_text('ai_response_title')} for {patient_name_match}")
+                    if status["ready_for_discharge"]:
+                        st.success(f"✅ {patient_name_match} is ready to go home. All lab results are completed, all bills are paid, and the patient has been in the system for {status['days_since_last']} days. Discharge can be initiated.")
+                    else:
+                        reasons = []
+                        if not status["all_labs_completed"]:
+                            reasons.append("pending lab results")
+                        if not status["all_bills_paid"]:
+                            reasons.append("unpaid invoices")
+                        if status["days_since_last"] < 1:
+                            reasons.append("patient was seen today, further observation recommended")
+                        st.warning(f"❌ {patient_name_match} is not yet ready for discharge. Reason: {', '.join(reasons)}.")
+                else:
+                    st.error(f"Patient '{patient_name_match}' not found.")
+            else:
+                with st.spinner(get_text("ai_thinking")):
+                    full_prompt = f"""You are an AI diagnostic assistant for a hospital management system. You must answer based ONLY on the provided hospital data and the hospital guidelines (if any). 
+If the question asks for something not in the data or guidelines, reply exactly: "Unfortunately, the provided information does not include that detail."
 
-Hospital Data:
 {hospital_summary}
+{guidelines_section}
 
 User Question: {user_question}
 
 Answer:"""
-                try:
-                    completion = groq_client.chat.completions.create(
-                        model="llama-3.1-8b-instant",
-                        messages=[{"role": "user", "content": full_prompt}],
-                        temperature=0.3,
-                        max_tokens=500
-                    )
-                    response = completion.choices[0].message.content.strip()
-                    st.markdown(f"### {get_text('ai_response_title')}")
-                    st.markdown(response)
-                except Exception as e:
-                    st.error(f"{get_text('ai_error')} Details: {str(e)}")
+                    try:
+                        completion = groq_client.chat.completions.create(
+                            model="llama-3.1-8b-instant",
+                            messages=[{"role": "user", "content": full_prompt}],
+                            temperature=0.3,
+                            max_tokens=500
+                        )
+                        response = completion.choices[0].message.content.strip()
+                        st.markdown(f"### {get_text('ai_response_title')}")
+                        st.markdown(response)
+                    except Exception as e:
+                        st.error(f"{get_text('ai_error')} Details: {str(e)}")
 
 # ========== LOGIN PAGE ==========
 def login_page():
     col_lang1, col_lang2, col_lang3 = st.columns([1,1,1])
     with col_lang2:
         language_selector()
-    
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.markdown(f"""
@@ -311,13 +379,11 @@ def login_page():
             <hr>
         </div>
         """, unsafe_allow_html=True)
-        
         with st.form("login_form"):
             username_input = st.text_input(get_text("username"), key="login_user")
             password_input = st.text_input(get_text("password"), type="password", key="login_pass")
             role_input = st.selectbox(get_text("role"), ["Admin", "Doctor", "Nurse", "Billing Staff"], key="login_role")
             submit = st.form_submit_button(get_text("sign_in"), use_container_width=True)
-            
             if submit:
                 if username_input == "Gesner" and password_input == "20082010" and role_input == "Admin":
                     st.session_state.authenticated = True
@@ -326,7 +392,6 @@ def login_page():
                     st.rerun()
                 else:
                     st.error(get_text("invalid_creds"))
-        
         st.markdown(f"""
         <div style="text-align: center; margin-top: 2rem;">
             <p>🩺 <strong>{get_text('demo_note')}</strong></p>
@@ -364,19 +429,13 @@ def main_dashboard():
     """, unsafe_allow_html=True)
     
     tabs = st.tabs([
-        get_text("tab_video"),
-        get_text("tab_overview"),
-        get_text("tab_patient"),
-        get_text("tab_billing"),
-        get_text("tab_pharmacy"),
-        get_text("tab_lab"),
-        get_text("tab_radiology"),
-        get_text("tab_inventory"),
-        get_text("tab_reports"),
+        get_text("tab_video"), get_text("tab_overview"), get_text("tab_patient"),
+        get_text("tab_billing"), get_text("tab_pharmacy"), get_text("tab_lab"),
+        get_text("tab_radiology"), get_text("tab_inventory"), get_text("tab_reports"),
         get_text("tab_ai_diagnostic")
     ])
     
-    # ---------- TAB 0: VIDEO INTRODUCTION ----------
+    # Tab 0: Video (unchanged)
     with tabs[0]:
         st.markdown(f"""
         <div class="card">
@@ -399,7 +458,7 @@ def main_dashboard():
         """, unsafe_allow_html=True)
         st.info(get_text("youtube_info"))
     
-    # ---------- TAB 1: OVERVIEW ----------
+    # Tab 1: Overview
     with tabs[1]:
         stats = st.session_state.hospital_stats
         col1, col2, col3, col4 = st.columns(4)
@@ -425,7 +484,7 @@ def main_dashboard():
                                        get_text("patient_col"): [87, 42, 23, 15]})
             st.bar_chart(dept_stats.set_index("Department"))
     
-    # ---------- TAB 2: PATIENT MANAGEMENT ----------
+    # Tab 2: Patient Management (unchanged)
     with tabs[2]:
         st.subheader(get_text("patient_registration"))
         with st.expander(get_text("register_new")):
@@ -455,14 +514,12 @@ def main_dashboard():
         st.subheader(get_text("recent_patients"))
         if st.session_state.patients:
             patients_df = pd.DataFrame(st.session_state.patients)
-            # Select columns to display
-            display_cols = ["mrn", "name", "age", "last_visit"]
-            st.dataframe(patients_df[display_cols], use_container_width=True)
+            st.dataframe(patients_df[["mrn", "name", "age", "last_visit"]], use_container_width=True)
         else:
             st.info("No patients registered yet. Use the form above to add patients.")
         st.caption(get_text("emr_note"))
     
-    # ---------- TAB 3: BILLING ----------
+    # Tab 3: Billing (unchanged)
     with tabs[3]:
         st.subheader(get_text("billing_title"))
         col1, col2 = st.columns(2)
@@ -481,7 +538,7 @@ def main_dashboard():
             else:
                 st.info("No invoices yet.")
     
-    # ---------- TAB 4: PHARMACY ----------
+    # Tab 4: Pharmacy (unchanged)
     with tabs[4]:
         st.subheader(get_text("pharmacy_title"))
         col1, col2 = st.columns(2)
@@ -497,7 +554,7 @@ def main_dashboard():
                                      get_text("reorder_level_col"): [100, 50, 30]})
             st.dataframe(stock_df, use_container_width=True)
     
-    # ---------- TAB 5: LABORATORY ----------
+    # Tab 5: Laboratory (unchanged)
     with tabs[5]:
         st.subheader(get_text("lab_title"))
         test = st.selectbox(get_text("order_lab_test"), ["Complete Blood Count", "Lipid Panel", "Liver Function Test", "Urinalysis"])
@@ -513,7 +570,7 @@ def main_dashboard():
         else:
             st.info("No lab orders yet.")
     
-    # ---------- TAB 6: RADIOLOGY ----------
+    # Tab 6: Radiology (unchanged)
     with tabs[6]:
         st.subheader(get_text("radiology_title"))
         scan = st.radio(get_text("select_imaging"), ["X-Ray", "CT Scan", "MRI", "Ultrasound"], horizontal=True)
@@ -521,7 +578,7 @@ def main_dashboard():
             st.success(get_text("scan_success").format(scan=scan))
         st.info(get_text("interop_note"))
     
-    # ---------- TAB 7: INVENTORY ----------
+    # Tab 7: Inventory (unchanged)
     with tabs[7]:
         st.subheader(get_text("inventory_title"))
         inv_items = pd.DataFrame({get_text("item_col"): ["Surgical Gloves", "Syringes", "Masks", "IV Fluids"],
@@ -530,7 +587,7 @@ def main_dashboard():
         st.dataframe(inv_items, use_container_width=True)
         st.caption(get_text("reorder_note"))
     
-    # ---------- TAB 8: REPORTS ----------
+    # Tab 8: Reports (unchanged)
     with tabs[8]:
         st.subheader(get_text("reports_title"))
         report_type = st.selectbox(get_text("select_report"), ["Daily Revenue", "Patient Visits", "Pharmacy Sales", "Department Performance"])
@@ -540,11 +597,11 @@ def main_dashboard():
                                   get_text("revenue_col"): [12500, 14800, 13200, 16700, 18900]})
         st.line_chart(df_report.set_index(get_text("day_col")))
     
-    # ---------- TAB 9: AI DIAGNOSTIC ASSISTANT ----------
+    # Tab 9: AI Diagnostic Assistant
     with tabs[9]:
         ai_diagnostic()
 
-# ========== APP ROUTING ==========
+# ========== RUN ==========
 if not st.session_state.authenticated:
     login_page()
 else:

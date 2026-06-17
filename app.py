@@ -6,6 +6,9 @@ import re
 from groq import Groq
 import io
 from docx import Document
+import tempfile
+import os
+from gtts import gTTS
 
 # ========== PAGE CONFIGURATION ==========
 st.set_page_config(
@@ -56,6 +59,26 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# ========== VOICE GENERATION ==========
+def generate_audio(text):
+    """Generate audio from text using gTTS and return bytes."""
+    if not text.strip():
+        return None
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+        tmp_path = tmp.name
+    try:
+        tts = gTTS(text=text, lang="en", slow=False)
+        tts.save(tmp_path)
+        with open(tmp_path, "rb") as f:
+            audio_bytes = f.read()
+        return audio_bytes
+    except Exception as e:
+        st.error(f"Voice generation error: {e}")
+        return None
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 # ========== INITIALIZE SESSION STATE ==========
 if "authenticated" not in st.session_state:
@@ -213,7 +236,8 @@ lang_en = {
     "upload_guidelines": "📄 Upload Hospital Guidelines (Word document)",
     "clear_guidelines": "🗑️ Clear Guidelines",
     "guidelines_uploaded": "✅ Guidelines loaded from {filename}",
-    "guidelines_cleared": "Guidelines cleared."
+    "guidelines_cleared": "Guidelines cleared.",
+    "voice_explain": "🎙️ AI Voice Explanation",
 }
 
 def get_text(key, lang=None):
@@ -402,6 +426,30 @@ def login_page():
 # ========== MAIN DASHBOARD ==========
 def main_dashboard():
     with st.sidebar:
+        # --- Photo and name ---
+        st.image("https://raw.githubusercontent.com/Deslandes1/Hospital-Management-System-Software-built-by-Gesner-Deslandes/main/Gesner%20Deslandes.png", width=80)
+        st.markdown("### **Gesner Deslandes**")
+        
+        # --- AI Voice Explanation button ---
+        if st.button(get_text("voice_explain"), use_container_width=True):
+            voice_text = """
+            Welcome to the Hospital Management System Software built by Gesner Deslandes.
+            This is a comprehensive, multi-specialty hospital management solution with integrated Electronic Medical Records, real-time operations, and enterprise modules.
+            The system includes patient registration and EMR, billing and revenue cycle management, pharmacy management with stock alerts, laboratory integration with test ordering and results tracking, radiology and imaging scheduling, inventory control, and enterprise reporting.
+            The AI Diagnostic Assistant allows you to ask clinical or operational questions and get insights based on actual hospital data.
+            You can also upload hospital guidelines in Word format and the AI will incorporate them into its answers.
+            The software supports multi-language interfaces and is built with a modern, user-friendly design.
+            This software was built by Gesner Deslandes, engineer in chief at GlobalInternet.py.
+            """
+            with st.spinner("Generating voice explanation..."):
+                audio_bytes = generate_audio(voice_text)
+                if audio_bytes:
+                    st.audio(audio_bytes, format="audio/mp3")
+                    st.success("Explanation played. Click again to repeat.")
+                else:
+                    st.error("Could not generate explanation audio.")
+        st.markdown("---")
+        
         st.image("https://img.icons8.com/fluency/96/null/hospital.png", width=80)
         st.markdown(f"**{get_text('welcome')}, {st.session_state.username}**  \n👨‍⚕️ {get_text('role')}: **{st.session_state.role}**")
         st.markdown("---")

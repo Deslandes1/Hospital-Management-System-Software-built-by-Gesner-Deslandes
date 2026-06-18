@@ -381,10 +381,14 @@ lang_en = {
     "voice_explain": "🎙️ AI Voice Explanation",
     "guidelines_note": """
 <div class="note-box">
-<strong>📋 About Hospital Guidelines</strong><br>
+<strong>📋 About Hospital Guidelines & Custom Updates</strong><br>
 This application already includes a comprehensive set of standard hospital guidelines (Patient Rights, Admission/Discharge, Medication Management, Infection Control, Emergency Procedures, etc.). 
-If your hospital wishes to upload its own custom guidelines for the AI to use, please contact the developer:
-<strong>Gesner Deslandes</strong> – deslandes78@gmail.com – and we will update the app for you.
+If your hospital wishes to <strong>upload its own custom guidelines</strong>, or if you need <strong>any specific adjustment</strong> – such as custom workflows, tailored reports, new modules, integration with your existing systems, or any other feature – please contact the developer directly:
+<br><br>
+<strong>Gesner Deslandes</strong><br>
+📧 deslandes78@gmail.com<br>
+📞 (509) 4738 5663<br><br>
+We will gladly update the application to meet your hospital's exact requirements.
 </div>
 """
 }

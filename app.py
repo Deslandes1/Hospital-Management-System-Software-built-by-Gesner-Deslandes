@@ -8,6 +8,7 @@ import io
 from docx import Document
 import tempfile
 import os
+import concurrent.futures
 
 # ========== VOICE GENERATION (with fallback) ==========
 try:
@@ -385,7 +386,7 @@ def get_patient_status(patient_name):
         "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
     }
 
-# ==================== UPDATED AI DIAGNOSTIC ====================
+# ==================== UPDATED AI DIAGNOSTIC WITH TIMEOUT ====================
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
@@ -466,7 +467,7 @@ def ai_diagnostic():
                     st.warning(f"❌ {patient_name_match} is not ready. Reasons: {', '.join(reasons)}.")
                 return
         
-        # ---- General question: call Groq (simple, no threading) ----
+        # ---- General question: call Groq with timeout ----
         with st.spinner(get_text("ai_thinking")):
             prompt = f"""You are a hospital assistant. Answer the user's question based ONLY on the data below.
 
@@ -477,22 +478,32 @@ Question: {user_question}
 
 Answer in one short sentence:"""
             
-            try:
-                completion = groq_client.chat.completions.create(
+            def call_groq():
+                return groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
                     max_tokens=100
                 )
-                response = completion.choices[0].message.content.strip()
-                st.markdown(f"### {get_text('ai_response_title')}")
-                st.markdown(response)
+            
+            try:
+                # Use ThreadPoolExecutor with a timeout
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(call_groq)
+                    try:
+                        completion = future.result(timeout=10)  # 10-second timeout
+                        response = completion.choices[0].message.content.strip()
+                        st.markdown(f"### {get_text('ai_response_title')}")
+                        st.markdown(response)
+                    except concurrent.futures.TimeoutError:
+                        st.error("⏳ The AI took too long to respond (over 10 seconds). Please try a shorter question or check your network.")
+                        if st.session_state.guidelines_text:
+                            st.info("🔹 As a fallback: The discharge criteria are stable vitals, resolved symptoms, ability to manage at home, and completion of labs/imaging.")
+                        else:
+                            st.info("💡 Please try again with a simpler question.")
             except Exception as e:
                 st.error(f"❌ API error: {str(e)}")
                 st.info("💡 Please check your Groq API key, internet, or try a shorter question.")
-                # Fallback answer
-                if st.session_state.guidelines_text:
-                    st.info("🔹 As a fallback: The discharge criteria are stable vitals, resolved symptoms, ability to manage at home, and completion of labs/imaging.")
 
 # ========== LOGIN PAGE ==========
 def login_page():
@@ -512,7 +523,7 @@ def login_page():
             username_input = st.text_input(get_text("username"), key="login_user")
             password_input = st.text_input(get_text("password"), type="password", key="login_pass")
             role_input = st.selectbox(get_text("role"), ["Admin", "Doctor", "Nurse", "Billing Staff"], key="login_role")
-            submit = st.form_submit_button(get_text("sign_in"), use_container_width=True)
+            submit = st.form_submit_button(get_text("sign_in"), width="stretch")
             if submit:
                 if username_input == "Gesner" and password_input == "20082010" and role_input == "Admin":
                     st.session_state.authenticated = True
@@ -534,7 +545,7 @@ def main_dashboard():
         st.image("https://raw.githubusercontent.com/Deslandes1/Hospital-Management-System-Software-built-by-Gesner-Deslandes/main/Gesner%20Deslandes.png", width=80)
         st.markdown("### **Gesner Deslandes**")
         
-        if st.button(get_text("voice_explain"), use_container_width=True):
+        if st.button(get_text("voice_explain"), width="stretch"):
             voice_text = """
             Welcome to the Hospital Management System Software built by Gesner Deslandes.
             This is a comprehensive, multi-specialty hospital management solution with integrated Electronic Medical Records, real-time operations, and enterprise modules.
@@ -562,7 +573,7 @@ def main_dashboard():
         st.markdown('<div class="security-badge">🔐 End‑to‑end encryption active</div>', unsafe_allow_html=True)
         st.caption("All data is secured and anonymized")
         st.markdown("---")
-        if st.button(get_text("logout"), use_container_width=True, key="logout_btn"):
+        if st.button(get_text("logout"), width="stretch", key="logout_btn"):
             st.session_state.authenticated = False
             st.session_state.username = ""
             st.rerun()
@@ -647,7 +658,7 @@ def main_dashboard():
             with col2:
                 phone = st.text_input(get_text("phone"))
                 address = st.text_area(get_text("address"))
-            if st.button(get_text("register_btn")):
+            if st.button(get_text("register_btn"), width="stretch"):
                 mrn = f"HOSP-{random.randint(10000,99999)}"
                 new_patient = {
                     "mrn": mrn,
@@ -686,7 +697,7 @@ def main_dashboard():
             patient_names = [p["name"] for p in st.session_state.patients] if st.session_state.patients else ["No patients"]
             bill_patient = st.selectbox(get_text("select_patient"), patient_names)
             amount = st.number_input(get_text("bill_amount"), min_value=0, step=10)
-            if st.button(get_text("generate_bill")):
+            if st.button(get_text("generate_bill"), width="stretch"):
                 inv_num = f"INV-{random.randint(200,999)}"
                 new_invoice = {"invoice": inv_num, "patient": bill_patient, "amount": amount, "status": "Pending"}
                 if SUPABASE_AVAILABLE:
@@ -714,7 +725,7 @@ def main_dashboard():
         with col1:
             med = st.selectbox(get_text("medication"), ["Paracetamol 500mg", "Amoxicillin 250mg", "Atorvastatin 20mg", "Insulin Glargine"])
             quantity = st.number_input(get_text("quantity"), 1, 100, step=1)
-            if st.button(get_text("dispense")):
+            if st.button(get_text("dispense"), width="stretch"):
                 st.info(get_text("dispense_success").format(med=med, qty=quantity))
         with col2:
             st.subheader(get_text("stock_alerts"))
@@ -729,7 +740,7 @@ def main_dashboard():
         test = st.selectbox(get_text("order_lab_test"), ["Complete Blood Count", "Lipid Panel", "Liver Function Test", "Urinalysis"])
         patient_names = [p["name"] for p in st.session_state.patients] if st.session_state.patients else ["No patients"]
         patient_test = st.selectbox(get_text("patient_mrn"), patient_names)
-        if st.button(get_text("order_test_btn")):
+        if st.button(get_text("order_test_btn"), width="stretch"):
             new_order = {"patient": patient_test, "test": test, "status": "Pending"}
             if SUPABASE_AVAILABLE:
                 inserted = insert_data("lab_orders", new_order)
@@ -753,7 +764,7 @@ def main_dashboard():
     with tabs[6]:
         st.subheader(get_text("radiology_title"))
         scan = st.radio(get_text("select_imaging"), ["X-Ray", "CT Scan", "MRI", "Ultrasound"], horizontal=True)
-        if st.button(get_text("schedule_scan")):
+        if st.button(get_text("schedule_scan"), width="stretch"):
             st.success(get_text("scan_success").format(scan=scan))
         st.info(get_text("interop_note"))
     
@@ -770,7 +781,7 @@ def main_dashboard():
     with tabs[8]:
         st.subheader(get_text("reports_title"))
         report_type = st.selectbox(get_text("select_report"), ["Daily Revenue", "Patient Visits", "Pharmacy Sales", "Department Performance"])
-        if st.button(get_text("generate_report")):
+        if st.button(get_text("generate_report"), width="stretch"):
             st.success(get_text("report_success").format(report=report_type))
         df_report = pd.DataFrame({get_text("day_col"): ["Mon", "Tue", "Wed", "Thu", "Fri"],
                                   get_text("revenue_col"): [12500, 14800, 13200, 16700, 18900]})

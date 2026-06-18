@@ -8,7 +8,30 @@ import io
 from docx import Document
 import tempfile
 import os
-from gtts import gTTS
+
+# ========== VOICE GENERATION (with fallback) ==========
+try:
+    from gtts import gTTS
+    VOICE_AVAILABLE = True
+except ImportError:
+    VOICE_AVAILABLE = False
+
+def generate_audio(text):
+    if not VOICE_AVAILABLE or not text.strip():
+        return None
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+        tmp_path = tmp.name
+    try:
+        tts = gTTS(text=text, lang="en", slow=False)
+        tts.save(tmp_path)
+        with open(tmp_path, "rb") as f:
+            audio_bytes = f.read()
+        return audio_bytes
+    except Exception:
+        return None
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 # ========== SUPABASE CLIENT ==========
 try:
@@ -65,25 +88,6 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
-# ========== VOICE GENERATION ==========
-def generate_audio(text):
-    if not text.strip():
-        return None
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-        tmp_path = tmp.name
-    try:
-        tts = gTTS(text=text, lang="en", slow=False)
-        tts.save(tmp_path)
-        with open(tmp_path, "rb") as f:
-            audio_bytes = f.read()
-        return audio_bytes
-    except Exception as e:
-        st.error(f"Voice generation error: {e}")
-        return None
-    finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
 
 # ========== GROQ CLIENT ==========
 if "GROQ_API_KEY" not in st.secrets:
@@ -381,19 +385,18 @@ def get_patient_status(patient_name):
         "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
     }
 
-# ========== AI DIAGNOSTIC ==========
+# ==================== AI DIAGNOSTIC (UPDATED) ====================
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
     
-    # ---- Guidelines upload/clear section ----
+    # ---- Guidelines upload/clear ----
     st.markdown("---")
     uploaded_file = st.file_uploader(get_text("upload_guidelines"), type=["docx"])
     if uploaded_file is not None:
         try:
             doc = Document(io.BytesIO(uploaded_file.read()))
             full_text = "\n".join([para.text for para in doc.paragraphs])
-            # Save to Supabase if available
             if SUPABASE_AVAILABLE:
                 save_guidelines(full_text)
             st.session_state.guidelines_text = full_text
@@ -415,54 +418,51 @@ def ai_diagnostic():
         st.info("No guidelines uploaded. AI will answer based only on hospital data.")
     st.markdown("---")
     
-    # ---- Build hospital summary (shortened) ----
+    # ---- Build a short summary of hospital data ----
     patient_count = len(st.session_state.patients)
     stats = st.session_state.hospital_stats
-    # Limit patient details to first 3 to save tokens
+    # only first 3 patients for brevity
     patient_sample = st.session_state.patients[:3]
     patient_list = "\n".join([f"- {p['name']} (MRN: {p['mrn']}, Age: {p['age']})" for p in patient_sample])
-    lab_summary = "\n".join([f"- {lab['patient']}: {lab['test']} – {lab['status']}" for lab in st.session_state.lab_orders[:5]])
-    invoice_summary = "\n".join([f"- {inv['patient']}: ${inv['amount']} ({inv['status']})" for inv in st.session_state.invoices[:5]])
+    lab_summary = "\n".join([f"- {lab['patient']}: {lab['test']} – {lab['status']}" for lab in st.session_state.lab_orders[:3]])
+    invoice_summary = "\n".join([f"- {inv['patient']}: ${inv['amount']} ({inv['status']})" for inv in st.session_state.invoices[:3]])
     
-    hospital_summary = f"""
-    Hospital Data:
-    - {patient_count} patients registered.
-    - Total patients today: {stats['total_patients_today']}
-    - Active beds: {stats['active_beds']} / 200
-    - Today's revenue: ${stats['today_revenue']:,}
-    - Lab tests pending: {stats['lab_tests_pending']}
-    - Recent patients: {patient_list}
-    - Lab orders: {lab_summary if st.session_state.lab_orders else 'None'}
-    - Invoices: {invoice_summary if st.session_state.invoices else 'None'}
-    """
+    hospital_summary = f"""Hospital Data:
+- {patient_count} patients.
+- Today: {stats['total_patients_today']} visits, {stats['active_beds']}/200 beds, ${stats['today_revenue']:,} revenue.
+- Lab pending: {stats['lab_tests_pending']}
+- Sample patients: {patient_list}
+- Lab orders: {lab_summary if st.session_state.lab_orders else 'None'}
+- Invoices: {invoice_summary if st.session_state.invoices else 'None'}
+"""
     
     guidelines_section = ""
     if st.session_state.guidelines_text:
-        # Trim guidelines to 3000 chars to avoid token limit
-        trimmed = st.session_state.guidelines_text[:3000]
+        # Trim to 2000 chars to avoid token limit
+        trimmed = st.session_state.guidelines_text[:2000]
         guidelines_section = f"Guidelines:\n{trimmed}"
     
     user_question = st.text_area(get_text("ai_question_label"), height=100,
-                                 placeholder="Example: Is Emily Clark ready to go home? or How many doctors work here? or According to guidelines, what is the protocol for patient discharge?")
+                                 placeholder="Example: Is Emily Clark ready to go home? or What is the discharge policy?")
     
     if st.button(get_text("ai_ask_button"), key="ai_ask"):
         if not user_question.strip():
             st.warning("Please enter a question.")
             return
         
-        # ---- Check for discharge question ----
+        # ---- Handle discharge questions locally ----
         patient_name_match = None
         for p in st.session_state.patients:
             if p["name"].lower() in user_question.lower():
                 patient_name_match = p["name"]
                 break
         
-        if patient_name_match and ("discharge" in user_question.lower() or "go home" in user_question.lower() or "ready" in user_question.lower()):
+        if patient_name_match and any(word in user_question.lower() for word in ["discharge", "go home", "ready"]):
             status = get_patient_status(patient_name_match)
             if status:
                 st.markdown(f"### {get_text('ai_response_title')} for {patient_name_match}")
                 if status["ready_for_discharge"]:
-                    st.success(f"✅ {patient_name_match} is ready to go home. All lab results are completed, all bills are paid, and the patient has been in the system for {status['days_since_last']} days. Discharge can be initiated.")
+                    st.success(f"✅ {patient_name_match} is ready to go home. All lab results completed, all bills paid, and patient has been in system for {status['days_since_last']} days.")
                 else:
                     reasons = []
                     if not status["all_labs_completed"]:
@@ -470,37 +470,38 @@ def ai_diagnostic():
                     if not status["all_bills_paid"]:
                         reasons.append("unpaid invoices")
                     if status["days_since_last"] < 1:
-                        reasons.append("patient was seen today, further observation recommended")
-                    st.warning(f"❌ {patient_name_match} is not yet ready for discharge. Reason: {', '.join(reasons)}.")
-                return  # Stop here, we already answered
+                        reasons.append("seen today, observation recommended")
+                    st.warning(f"❌ {patient_name_match} is not ready. Reasons: {', '.join(reasons)}.")
+                return
         
-        # ---- General question: call Groq ----
+        # ---- General question: call Groq with very short prompt ----
         with st.spinner(get_text("ai_thinking")):
-            full_prompt = f"""You are an AI diagnostic assistant for a hospital. Answer based ONLY on the provided data and guidelines.
+            # Build a minimal prompt
+            prompt = f"""You are a hospital assistant. Answer the user's question based ONLY on the following data and guidelines.
 
 {hospital_summary}
 {guidelines_section}
 
-User Question: {user_question}
+Question: {user_question}
 
-Answer (be concise, under 100 words):"""
+Answer briefly (max 2 sentences):"""
             
-            # Debug: print prompt length to logs
-            print(f"Prompt length: {len(full_prompt)} chars")
+            print(f"Prompt length: {len(prompt)}")  # visible in logs
             
             try:
                 completion = groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
-                    messages=[{"role": "user", "content": full_prompt}],
-                    temperature=0.3,
-                    max_tokens=300  # reduced to fit free tier
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.2,
+                    max_tokens=150
                 )
                 response = completion.choices[0].message.content.strip()
                 st.markdown(f"### {get_text('ai_response_title')}")
                 st.markdown(response)
             except Exception as e:
-                st.error(f"❌ {get_text('ai_error')} Details: {str(e)}")
-                st.info("💡 Tip: Your Groq API key may have reached its rate limit or the prompt is too long. Try a shorter question or check your account.")
+                # Show the error and a fallback answer
+                st.error(f"❌ API error: {str(e)}")
+                st.info("💡 Please try a simpler question, or check your Groq API key and internet connection.")
 
 # ========== LOGIN PAGE ==========
 def login_page():

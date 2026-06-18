@@ -386,7 +386,7 @@ def get_patient_status(patient_name):
         "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
     }
 
-# ==================== UPDATED AI DIAGNOSTIC WITH TIMEOUT ====================
+# ==================== IMPROVED AI DIAGNOSTIC ====================
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
@@ -419,7 +419,7 @@ def ai_diagnostic():
         st.info("No guidelines uploaded. AI will answer based only on hospital data.")
     st.markdown("---")
     
-    # ---- Build a VERY short summary of hospital data ----
+    # ---- Build a short summary of hospital data ----
     stats = st.session_state.hospital_stats
     patient_count = len(st.session_state.patients)
     first_patient = st.session_state.patients[0] if st.session_state.patients else None
@@ -429,14 +429,14 @@ def ai_diagnostic():
     if first_patient:
         hospital_summary += f", Sample patient: {patient_info}"
     
-    # ---- Guidelines trimmed to 500 chars ----
+    # ---- Guidelines trimmed to 2000 chars (more detail) ----
     guidelines_section = ""
     if st.session_state.guidelines_text:
-        trimmed = st.session_state.guidelines_text[:500]  # Very short to avoid token limits
+        trimmed = st.session_state.guidelines_text[:2000]  # Increased to include full sections
         guidelines_section = f"Guidelines:\n{trimmed}"
     
     user_question = st.text_area(get_text("ai_question_label"), height=100,
-                                 placeholder="Example: Is Emily Clark ready to go home? or What is the discharge policy?")
+                                 placeholder="Example: Is Emily Clark ready to go home? or What is the discharge policy? or List patient rights")
     
     if st.button(get_text("ai_ask_button"), key="ai_ask"):
         if not user_question.strip():
@@ -469,36 +469,37 @@ def ai_diagnostic():
         
         # ---- General question: call Groq with timeout ----
         with st.spinner(get_text("ai_thinking")):
+            # New prompt: request a detailed summary, not just one sentence
             prompt = f"""You are a hospital assistant. Answer the user's question based ONLY on the data below.
+Provide a clear, structured summary (use bullet points if appropriate). Include specific details from the guidelines if the question asks about policies.
 
 {hospital_summary}
 {guidelines_section}
 
 Question: {user_question}
 
-Answer in one short sentence:"""
+Answer:"""
             
             def call_groq():
                 return groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
-                    max_tokens=100
+                    max_tokens=300  # Increased to allow more details
                 )
             
             try:
-                # Use ThreadPoolExecutor with a timeout
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(call_groq)
                     try:
-                        completion = future.result(timeout=10)  # 10-second timeout
+                        completion = future.result(timeout=15)  # 15 seconds for longer prompt
                         response = completion.choices[0].message.content.strip()
                         st.markdown(f"### {get_text('ai_response_title')}")
                         st.markdown(response)
                     except concurrent.futures.TimeoutError:
-                        st.error("⏳ The AI took too long to respond (over 10 seconds). Please try a shorter question or check your network.")
+                        st.error("⏳ The AI took too long to respond (over 15 seconds). Please try a shorter question or check your network.")
                         if st.session_state.guidelines_text:
-                            st.info("🔹 As a fallback: The discharge criteria are stable vitals, resolved symptoms, ability to manage at home, and completion of labs/imaging.")
+                            st.info("🔹 As a fallback, the patient rights include: respectful care, informed consent, privacy, access to records, and the right to refuse treatment. See the full guidelines for all details.")
                         else:
                             st.info("💡 Please try again with a simpler question.")
             except Exception as e:

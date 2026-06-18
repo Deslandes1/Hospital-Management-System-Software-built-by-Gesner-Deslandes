@@ -8,6 +8,8 @@ import io
 from docx import Document
 import tempfile
 import os
+import concurrent.futures
+import time
 
 # ========== VOICE GENERATION (with fallback) ==========
 try:
@@ -332,7 +334,7 @@ lang_en = {
     "spanish": "Español",
     "french": "Français",
     "ai_diagnostic_title": "🤖 AI Diagnostic Assistant",
-    "ai_diagnostic_desc": "Ask any clinical or operational question about patients, inventory, billing, or lab results. The AI will provide insights based on actual hospital data. You can also ask if a patient is ready for discharge. **Hospital guidelines (if uploaded) will be used to answer policy-related questions.**",
+    "ai_diagnostic_desc": "Ask any clinical or operational question about patients, inventory, billing, or lab results. The AI will provide insights based on actual hospital data. You can also ask if a patient is ready for discharge. Hospital guidelines (if uploaded) will be used to answer policy-related questions.",
     "ai_question_label": "💬 Your question:",
     "ai_ask_button": "Ask AI",
     "ai_thinking": "🧠 AI is analyzing your question and hospital data...",
@@ -385,7 +387,7 @@ def get_patient_status(patient_name):
         "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
     }
 
-# ==================== AI DIAGNOSTIC (UPDATED) ====================
+# ==================== AI DIAGNOSTIC (UPDATED WITH TIMEOUT) ====================
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
@@ -421,7 +423,6 @@ def ai_diagnostic():
     # ---- Build a short summary of hospital data ----
     patient_count = len(st.session_state.patients)
     stats = st.session_state.hospital_stats
-    # only first 3 patients for brevity
     patient_sample = st.session_state.patients[:3]
     patient_list = "\n".join([f"- {p['name']} (MRN: {p['mrn']}, Age: {p['age']})" for p in patient_sample])
     lab_summary = "\n".join([f"- {lab['patient']}: {lab['test']} – {lab['status']}" for lab in st.session_state.lab_orders[:3]])
@@ -438,7 +439,6 @@ def ai_diagnostic():
     
     guidelines_section = ""
     if st.session_state.guidelines_text:
-        # Trim to 2000 chars to avoid token limit
         trimmed = st.session_state.guidelines_text[:2000]
         guidelines_section = f"Guidelines:\n{trimmed}"
     
@@ -474,9 +474,8 @@ def ai_diagnostic():
                     st.warning(f"❌ {patient_name_match} is not ready. Reasons: {', '.join(reasons)}.")
                 return
         
-        # ---- General question: call Groq with very short prompt ----
+        # ---- General question: call Groq with timeout ----
         with st.spinner(get_text("ai_thinking")):
-            # Build a minimal prompt
             prompt = f"""You are a hospital assistant. Answer the user's question based ONLY on the following data and guidelines.
 
 {hospital_summary}
@@ -486,22 +485,31 @@ Question: {user_question}
 
 Answer briefly (max 2 sentences):"""
             
-            print(f"Prompt length: {len(prompt)}")  # visible in logs
-            
-            try:
-                completion = groq_client.chat.completions.create(
+            def call_groq():
+                return groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
                     max_tokens=150
                 )
-                response = completion.choices[0].message.content.strip()
-                st.markdown(f"### {get_text('ai_response_title')}")
-                st.markdown(response)
+
+            try:
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(call_groq)
+                    try:
+                        completion = future.result(timeout=10)  # 10-second timeout
+                        response = completion.choices[0].message.content.strip()
+                        st.markdown(f"### {get_text('ai_response_title')}")
+                        st.markdown(response)
+                    except concurrent.futures.TimeoutError:
+                        st.error("⏳ The AI took too long to respond. Please try a shorter question or check your internet connection.")
+                        if st.session_state.guidelines_text:
+                            st.info("💡 As a fallback, I can tell you that the discharge criteria are: stable vitals, resolved symptoms, ability to manage at home, and all labs/imaging completed. Check the guidelines for full details.")
+                        else:
+                            st.info("💡 Please try again with a simpler question.")
             except Exception as e:
-                # Show the error and a fallback answer
                 st.error(f"❌ API error: {str(e)}")
-                st.info("💡 Please try a simpler question, or check your Groq API key and internet connection.")
+                st.info("💡 Please check your Groq API key and network.")
 
 # ========== LOGIN PAGE ==========
 def login_page():
@@ -595,7 +603,7 @@ def main_dashboard():
         get_text("tab_ai_diagnostic")
     ])
     
-    # Tab 0: Video (unchanged)
+    # Tab 0: Video
     with tabs[0]:
         st.markdown(f"""
         <div class="card">
@@ -618,7 +626,7 @@ def main_dashboard():
         """, unsafe_allow_html=True)
         st.info(get_text("youtube_info"))
     
-    # Tab 1: Overview (unchanged)
+    # Tab 1: Overview
     with tabs[1]:
         stats = st.session_state.hospital_stats
         col1, col2, col3, col4 = st.columns(4)
@@ -644,7 +652,7 @@ def main_dashboard():
                                        get_text("patient_col"): [87, 42, 23, 15]})
             st.bar_chart(dept_stats.set_index("Department"))
     
-    # Tab 2: Patient Management (Supabase)
+    # Tab 2: Patient Management
     with tabs[2]:
         st.subheader(get_text("patient_registration"))
         with st.expander(get_text("register_new")):
@@ -687,7 +695,7 @@ def main_dashboard():
             st.info("No patients registered yet. Use the form above to add patients.")
         st.caption(get_text("emr_note"))
     
-    # Tab 3: Billing (Supabase)
+    # Tab 3: Billing
     with tabs[3]:
         st.subheader(get_text("billing_title"))
         col1, col2 = st.columns(2)
@@ -716,7 +724,7 @@ def main_dashboard():
             else:
                 st.info("No invoices yet.")
     
-    # Tab 4: Pharmacy (no change)
+    # Tab 4: Pharmacy
     with tabs[4]:
         st.subheader(get_text("pharmacy_title"))
         col1, col2 = st.columns(2)
@@ -732,7 +740,7 @@ def main_dashboard():
                                      get_text("reorder_level_col"): [100, 50, 30]})
             st.dataframe(stock_df, use_container_width=True)
     
-    # Tab 5: Laboratory (Supabase)
+    # Tab 5: Laboratory
     with tabs[5]:
         st.subheader(get_text("lab_title"))
         test = st.selectbox(get_text("order_lab_test"), ["Complete Blood Count", "Lipid Panel", "Liver Function Test", "Urinalysis"])
@@ -758,7 +766,7 @@ def main_dashboard():
         else:
             st.info("No lab orders yet.")
     
-    # Tab 6: Radiology (no change)
+    # Tab 6: Radiology
     with tabs[6]:
         st.subheader(get_text("radiology_title"))
         scan = st.radio(get_text("select_imaging"), ["X-Ray", "CT Scan", "MRI", "Ultrasound"], horizontal=True)
@@ -766,7 +774,7 @@ def main_dashboard():
             st.success(get_text("scan_success").format(scan=scan))
         st.info(get_text("interop_note"))
     
-    # Tab 7: Inventory (no change)
+    # Tab 7: Inventory
     with tabs[7]:
         st.subheader(get_text("inventory_title"))
         inv_items = pd.DataFrame({get_text("item_col"): ["Surgical Gloves", "Syringes", "Masks", "IV Fluids"],
@@ -775,7 +783,7 @@ def main_dashboard():
         st.dataframe(inv_items, use_container_width=True)
         st.caption(get_text("reorder_note"))
     
-    # Tab 8: Reports (no change)
+    # Tab 8: Reports
     with tabs[8]:
         st.subheader(get_text("reports_title"))
         report_type = st.selectbox(get_text("select_report"), ["Daily Revenue", "Patient Visits", "Pharmacy Sales", "Department Performance"])

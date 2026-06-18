@@ -8,7 +8,6 @@ import io
 from docx import Document
 import tempfile
 import os
-import concurrent.futures
 
 # ========== VOICE GENERATION (with fallback) ==========
 try:
@@ -386,7 +385,7 @@ def get_patient_status(patient_name):
         "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
     }
 
-# ==================== IMPROVED AI DIAGNOSTIC ====================
+# ==================== FIXED AI DIAGNOSTIC ====================
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
@@ -429,10 +428,10 @@ def ai_diagnostic():
     if first_patient:
         hospital_summary += f", Sample patient: {patient_info}"
     
-    # ---- Guidelines trimmed to 2000 chars (more detail) ----
+    # ---- Guidelines trimmed to only 800 characters (to avoid token limits) ----
     guidelines_section = ""
     if st.session_state.guidelines_text:
-        trimmed = st.session_state.guidelines_text[:2000]  # Increased to include full sections
+        trimmed = st.session_state.guidelines_text[:800]  # Keep it short and fast
         guidelines_section = f"Guidelines:\n{trimmed}"
     
     user_question = st.text_area(get_text("ai_question_label"), height=100,
@@ -467,9 +466,9 @@ def ai_diagnostic():
                     st.warning(f"❌ {patient_name_match} is not ready. Reasons: {', '.join(reasons)}.")
                 return
         
-        # ---- General question: call Groq with timeout ----
+        # ---- General question: call Groq with direct timeout ----
         with st.spinner(get_text("ai_thinking")):
-            # New prompt: request a detailed summary, not just one sentence
+            # Build the prompt (short and focused)
             prompt = f"""You are a hospital assistant. Answer the user's question based ONLY on the data below.
 Provide a clear, structured summary (use bullet points if appropriate). Include specific details from the guidelines if the question asks about policies.
 
@@ -480,31 +479,27 @@ Question: {user_question}
 
 Answer:"""
             
-            def call_groq():
-                return groq_client.chat.completions.create(
+            # Print prompt length to logs for debugging
+            print(f"Prompt length: {len(prompt)} characters")
+            
+            try:
+                # Direct call with timeout (in seconds)
+                completion = groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
-                    max_tokens=300  # Increased to allow more details
+                    max_tokens=250,
+                    timeout=12  # timeout after 12 seconds
                 )
-            
-            try:
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(call_groq)
-                    try:
-                        completion = future.result(timeout=15)  # 15 seconds for longer prompt
-                        response = completion.choices[0].message.content.strip()
-                        st.markdown(f"### {get_text('ai_response_title')}")
-                        st.markdown(response)
-                    except concurrent.futures.TimeoutError:
-                        st.error("⏳ The AI took too long to respond (over 15 seconds). Please try a shorter question or check your network.")
-                        if st.session_state.guidelines_text:
-                            st.info("🔹 As a fallback, the patient rights include: respectful care, informed consent, privacy, access to records, and the right to refuse treatment. See the full guidelines for all details.")
-                        else:
-                            st.info("💡 Please try again with a simpler question.")
+                response = completion.choices[0].message.content.strip()
+                st.markdown(f"### {get_text('ai_response_title')}")
+                st.markdown(response)
             except Exception as e:
-                st.error(f"❌ API error: {str(e)}")
-                st.info("💡 Please check your Groq API key, internet, or try a shorter question.")
+                # Catch any error (timeout, rate limit, etc.)
+                st.error(f"❌ AI service error: {str(e)}")
+                st.info("💡 Please try a shorter question or ensure your Groq API key is valid and has sufficient quota.")
+                if st.session_state.guidelines_text:
+                    st.info("🔹 As a fallback, you can refer to the uploaded guidelines manually. The AI failed to process them due to timeout.")
 
 # ========== LOGIN PAGE ==========
 def login_page():

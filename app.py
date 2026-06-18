@@ -8,8 +8,6 @@ import io
 from docx import Document
 import tempfile
 import os
-import concurrent.futures
-import time
 
 # ========== VOICE GENERATION (with fallback) ==========
 try:
@@ -387,7 +385,7 @@ def get_patient_status(patient_name):
         "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
     }
 
-# ==================== AI DIAGNOSTIC (UPDATED WITH TIMEOUT) ====================
+# ==================== UPDATED AI DIAGNOSTIC ====================
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
@@ -420,26 +418,20 @@ def ai_diagnostic():
         st.info("No guidelines uploaded. AI will answer based only on hospital data.")
     st.markdown("---")
     
-    # ---- Build a short summary of hospital data ----
-    patient_count = len(st.session_state.patients)
+    # ---- Build a VERY short summary of hospital data ----
     stats = st.session_state.hospital_stats
-    patient_sample = st.session_state.patients[:3]
-    patient_list = "\n".join([f"- {p['name']} (MRN: {p['mrn']}, Age: {p['age']})" for p in patient_sample])
-    lab_summary = "\n".join([f"- {lab['patient']}: {lab['test']} – {lab['status']}" for lab in st.session_state.lab_orders[:3]])
-    invoice_summary = "\n".join([f"- {inv['patient']}: ${inv['amount']} ({inv['status']})" for inv in st.session_state.invoices[:3]])
+    patient_count = len(st.session_state.patients)
+    first_patient = st.session_state.patients[0] if st.session_state.patients else None
+    patient_info = f"{first_patient['name']} (MRN: {first_patient['mrn']})" if first_patient else "None"
     
-    hospital_summary = f"""Hospital Data:
-- {patient_count} patients.
-- Today: {stats['total_patients_today']} visits, {stats['active_beds']}/200 beds, ${stats['today_revenue']:,} revenue.
-- Lab pending: {stats['lab_tests_pending']}
-- Sample patients: {patient_list}
-- Lab orders: {lab_summary if st.session_state.lab_orders else 'None'}
-- Invoices: {invoice_summary if st.session_state.invoices else 'None'}
-"""
+    hospital_summary = f"Patients: {patient_count}, Today's visits: {stats['total_patients_today']}, Revenue: ${stats['today_revenue']}, Lab pending: {stats['lab_tests_pending']}"
+    if first_patient:
+        hospital_summary += f", Sample patient: {patient_info}"
     
+    # ---- Guidelines trimmed to 500 chars ----
     guidelines_section = ""
     if st.session_state.guidelines_text:
-        trimmed = st.session_state.guidelines_text[:2000]
+        trimmed = st.session_state.guidelines_text[:500]  # Very short to avoid token limits
         guidelines_section = f"Guidelines:\n{trimmed}"
     
     user_question = st.text_area(get_text("ai_question_label"), height=100,
@@ -450,7 +442,7 @@ def ai_diagnostic():
             st.warning("Please enter a question.")
             return
         
-        # ---- Handle discharge questions locally ----
+        # ---- Handle discharge questions locally (fast) ----
         patient_name_match = None
         for p in st.session_state.patients:
             if p["name"].lower() in user_question.lower():
@@ -474,42 +466,33 @@ def ai_diagnostic():
                     st.warning(f"❌ {patient_name_match} is not ready. Reasons: {', '.join(reasons)}.")
                 return
         
-        # ---- General question: call Groq with timeout ----
+        # ---- General question: call Groq (simple, no threading) ----
         with st.spinner(get_text("ai_thinking")):
-            prompt = f"""You are a hospital assistant. Answer the user's question based ONLY on the following data and guidelines.
+            prompt = f"""You are a hospital assistant. Answer the user's question based ONLY on the data below.
 
 {hospital_summary}
 {guidelines_section}
 
 Question: {user_question}
 
-Answer briefly (max 2 sentences):"""
+Answer in one short sentence:"""
             
-            def call_groq():
-                return groq_client.chat.completions.create(
+            try:
+                completion = groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
-                    max_tokens=150
+                    max_tokens=100
                 )
-
-            try:
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(call_groq)
-                    try:
-                        completion = future.result(timeout=10)  # 10-second timeout
-                        response = completion.choices[0].message.content.strip()
-                        st.markdown(f"### {get_text('ai_response_title')}")
-                        st.markdown(response)
-                    except concurrent.futures.TimeoutError:
-                        st.error("⏳ The AI took too long to respond. Please try a shorter question or check your internet connection.")
-                        if st.session_state.guidelines_text:
-                            st.info("💡 As a fallback, I can tell you that the discharge criteria are: stable vitals, resolved symptoms, ability to manage at home, and all labs/imaging completed. Check the guidelines for full details.")
-                        else:
-                            st.info("💡 Please try again with a simpler question.")
+                response = completion.choices[0].message.content.strip()
+                st.markdown(f"### {get_text('ai_response_title')}")
+                st.markdown(response)
             except Exception as e:
                 st.error(f"❌ API error: {str(e)}")
-                st.info("💡 Please check your Groq API key and network.")
+                st.info("💡 Please check your Groq API key, internet, or try a shorter question.")
+                # Fallback answer
+                if st.session_state.guidelines_text:
+                    st.info("🔹 As a fallback: The discharge criteria are stable vitals, resolved symptoms, ability to manage at home, and completion of labs/imaging.")
 
 # ========== LOGIN PAGE ==========
 def login_page():

@@ -47,7 +47,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ========== CUSTOM CSS (LIGHT BLUE THEME) ==========
+# ========== CUSTOM CSS ==========
 st.markdown("""
 <style>
     .stApp { background-color: #e6f0ff; }
@@ -85,6 +85,13 @@ st.markdown("""
         font-weight: bold;
         color: #1e3f6b;
         border: 1px solid #4a90e2;
+    }
+    .note-box {
+        background-color: #fff3cd;
+        border-left: 4px solid #ffc107;
+        padding: 10px 15px;
+        border-radius: 5px;
+        margin: 10px 0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -128,43 +135,6 @@ def insert_data(table_name, data):
     except Exception:
         return None
 
-def update_data(table_name, id_col, id_val, data):
-    if not SUPABASE_AVAILABLE:
-        return None
-    try:
-        response = supabase.table(table_name).update(data).eq(id_col, id_val).execute()
-        return response.data[0] if response.data else None
-    except Exception:
-        return None
-
-def delete_data(table_name, id_col, id_val):
-    if not SUPABASE_AVAILABLE:
-        return
-    try:
-        supabase.table(table_name).delete().eq(id_col, id_val).execute()
-    except Exception:
-        pass
-
-def load_guidelines():
-    if not SUPABASE_AVAILABLE:
-        return ""
-    try:
-        res = supabase.table("guidelines").select("content").eq("id", 1).execute()
-        if res.data:
-            return res.data[0].get("content", "")
-    except Exception:
-        pass
-    return ""
-
-def save_guidelines(content):
-    if not SUPABASE_AVAILABLE:
-        return
-    try:
-        supabase.table("guidelines").upsert({"id": 1, "content": content}).execute()
-    except Exception:
-        pass
-
-# ========== INITIALIZE SESSION STATE ==========
 def refresh_patients():
     if SUPABASE_AVAILABLE:
         st.session_state.patients = fetch_data("patients")
@@ -197,14 +167,81 @@ def refresh_lab_orders():
                 {"patient": "James Brown", "test": "Lipid Panel", "status": "Pending"}
             ]
 
-def refresh_guidelines():
-    if SUPABASE_AVAILABLE:
-        st.session_state.guidelines_text = load_guidelines()
-    else:
-        if "guidelines_text" not in st.session_state:
-            st.session_state.guidelines_text = ""
+# ========== DEFAULT GUIDELINES (embedded) ==========
+DEFAULT_GUIDELINES = """
+HOSPITAL GUIDELINES MANUAL
+Version 2.0 – Effective January 1, 2026
 
-# Initialize
+1. PATIENT RIGHTS AND RESPONSIBILITIES
+1.1. Every patient has the right to receive respectful, dignified, and compassionate care regardless of race, religion, gender, age, or socioeconomic status.
+1.2. Patients have the right to be fully informed about their diagnosis, treatment options, risks, and expected outcomes in clear, understandable language.
+1.3. Informed consent must be obtained before any procedure, surgery, or experimental treatment.
+1.4. Patients have the right to refuse treatment and to be informed of the medical consequences of such refusal.
+1.5. Patients have the right to privacy and confidentiality of their medical information in accordance with HIPAA and applicable laws.
+1.6. Patients have the right to access their medical records and request amendments.
+1.7. Patients may designate a family member or legal representative to make decisions on their behalf.
+
+2. ADMISSION AND DISCHARGE POLICY
+2.1. All admissions must be physician-ordered and documented in the EMR within 30 minutes.
+2.2. Admission orders must include diagnosis, acuity level, dietary restrictions, medication orders, and special precautions.
+2.3. A complete physical examination must be performed within 24 hours of admission.
+2.4. Discharge planning must begin at admission.
+2.5. Discharge criteria: stable vital signs for 24 hours, resolution or improvement of symptoms, ability to manage at home, completion of all necessary labs and imaging.
+2.6. Discharge summaries must be completed within 48 hours and include: diagnosis, procedures, medications, follow-up appointments, and patient instructions.
+2.7. No patient shall be discharged without a signed physician order and documented plan.
+
+3. MEDICATION MANAGEMENT
+3.1. All medication orders must be entered into the EMR by a licensed physician, NP, or PA.
+3.2. Medication reconciliation is required at admission, transfer, and discharge.
+3.3. High-alert medications (insulin, heparin, opioids, chemotherapy) require independent double-check.
+3.4. All medications must be administered within one hour of scheduled time.
+3.5. Adverse drug reactions and medication errors must be reported immediately and documented.
+
+4. INFECTION PREVENTION
+4.1. Hand hygiene (alcohol-based sanitizer or soap and water) before and after every patient contact.
+4.2. Contact precautions for MDROs (MRSA, VRE, CRE).
+4.3. Droplet precautions for respiratory infections (influenza, COVID-19, pertussis).
+4.4. Airborne precautions (N95, negative‑pressure) for TB, measles, varicella.
+4.5. All linens are infectious – handle with PPE.
+4.6. Needlestick injuries must be reported immediately to occupational health.
+
+5. EMERGENCY PROCEDURES
+5.1. Code Blue: activate emergency team, start CPR.
+5.2. Code Stroke: stroke alert within 5 minutes; CT within 20 minutes, results within 45 minutes.
+5.3. Code Sepsis: screening at triage; start protocol within 1 hour if criteria met.
+5.4. Fire: follow RACE (Rescue, Alarm, Contain, Extinguish/Evacuate).
+5.5. Mass casualty: incident command activated; use triage tags (Red, Yellow, Green, Black).
+
+6. DATA PRIVACY AND INFORMATION SECURITY
+6.1. All staff must complete annual HIPAA and cybersecurity training.
+6.2. Patient information accessed only on a need‑to‑know basis.
+6.3. Passwords must be strong and changed every 90 days; MFA required for remote access.
+6.4. EMR access is logged and audited monthly.
+6.5. Unauthorized disclosure is grounds for immediate termination.
+
+7. CODE OF CONDUCT
+7.1. All staff must treat colleagues, patients, and visitors with respect.
+7.2. Discrimination, harassment, bullying, or retaliation is prohibited.
+7.3. Staff must maintain professional appearance and visible ID badges.
+7.4. Conflicts of interest must be disclosed.
+7.5. Safety concerns or ethical violations must be reported via the anonymous system.
+
+8. PATIENT EDUCATION AND DISCHARGE PLANNING
+8.1. Every patient must receive education on diagnosis, medications, side effects, and warning signs.
+8.2. Discharge instructions must be reviewed with patient/caregiver in preferred language.
+8.3. A medication list with dosages, frequencies, and purposes must be provided at discharge.
+8.4. Follow‑up appointments must be scheduled and confirmed before discharge.
+8.5. Social work/case management consultations for complex needs.
+
+9. QUALITY IMPROVEMENT AND PATIENT SAFETY
+9.1. Sentinel events must be reported to quality department within 24 hours.
+9.2. Root cause analysis within 30 days of any sentinel event.
+9.3. Staff are encouraged to report near misses and safety concerns.
+9.4. Daily safety huddles are required on each unit.
+9.5. Performance metrics (length of stay, readmission rates, satisfaction scores) are tracked monthly.
+"""
+
+# ========== INITIALIZE SESSION STATE ==========
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "username" not in st.session_state:
@@ -217,7 +254,10 @@ if "language" not in st.session_state:
 refresh_patients()
 refresh_invoices()
 refresh_lab_orders()
-refresh_guidelines()
+
+# Set guidelines to the default embedded ones (no upload needed)
+if "guidelines_text" not in st.session_state:
+    st.session_state.guidelines_text = DEFAULT_GUIDELINES
 
 if "hospital_stats" not in st.session_state:
     st.session_state.hospital_stats = {
@@ -332,17 +372,21 @@ lang_en = {
     "spanish": "Español",
     "french": "Français",
     "ai_diagnostic_title": "🤖 AI Diagnostic Assistant",
-    "ai_diagnostic_desc": "Ask any clinical or operational question about patients, inventory, billing, or lab results. The AI will provide insights based on actual hospital data. You can also ask if a patient is ready for discharge. Hospital guidelines (if uploaded) will be used to answer policy-related questions.",
+    "ai_diagnostic_desc": "Ask any clinical or operational question about patients, inventory, billing, or lab results. The AI will provide insights based on actual hospital data. You can also ask if a patient is ready for discharge. Hospital guidelines are already embedded in the system to answer policy-related questions.",
     "ai_question_label": "💬 Your question:",
     "ai_ask_button": "Ask AI",
     "ai_thinking": "🧠 AI is analyzing your question and hospital data...",
     "ai_response_title": "💡 AI Diagnostic Insight",
     "ai_error": "⚠️ AI service error. Please try again later.",
-    "upload_guidelines": "📄 Upload Hospital Guidelines (Word document)",
-    "clear_guidelines": "🗑️ Clear Guidelines",
-    "guidelines_uploaded": "✅ Guidelines loaded from {filename}",
-    "guidelines_cleared": "Guidelines cleared.",
     "voice_explain": "🎙️ AI Voice Explanation",
+    "guidelines_note": """
+<div class="note-box">
+<strong>📋 About Hospital Guidelines</strong><br>
+This application already includes a comprehensive set of standard hospital guidelines (Patient Rights, Admission/Discharge, Medication Management, Infection Control, Emergency Procedures, etc.). 
+If your hospital wishes to upload its own custom guidelines for the AI to use, please contact the developer:
+<strong>Gesner Deslandes</strong> – deslandes78@gmail.com – and we will update the app for you.
+</div>
+"""
 }
 
 def get_text(key, lang=None):
@@ -385,37 +429,13 @@ def get_patient_status(patient_name):
         "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
     }
 
-# ==================== FIXED AI DIAGNOSTIC ====================
+# ========== AI DIAGNOSTIC ==========
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
     
-    # ---- Guidelines upload/clear ----
-    st.markdown("---")
-    uploaded_file = st.file_uploader(get_text("upload_guidelines"), type=["docx"])
-    if uploaded_file is not None:
-        try:
-            doc = Document(io.BytesIO(uploaded_file.read()))
-            full_text = "\n".join([para.text for para in doc.paragraphs])
-            if SUPABASE_AVAILABLE:
-                save_guidelines(full_text)
-            st.session_state.guidelines_text = full_text
-            st.success(get_text("guidelines_uploaded").format(filename=uploaded_file.name))
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error reading Word document: {e}")
-    
-    if st.session_state.guidelines_text and st.button(get_text("clear_guidelines"), key="clear_guidelines_btn"):
-        if SUPABASE_AVAILABLE:
-            save_guidelines("")
-        st.session_state.guidelines_text = ""
-        st.success(get_text("guidelines_cleared"))
-        st.rerun()
-    
-    if st.session_state.guidelines_text:
-        st.info(f"📋 Guidelines loaded (first 300 chars): {st.session_state.guidelines_text[:300]}...")
-    else:
-        st.info("No guidelines uploaded. AI will answer based only on hospital data.")
+    # Show the guidelines note
+    st.markdown(get_text("guidelines_note"), unsafe_allow_html=True)
     st.markdown("---")
     
     # ---- Build a short summary of hospital data ----
@@ -428,11 +448,10 @@ def ai_diagnostic():
     if first_patient:
         hospital_summary += f", Sample patient: {patient_info}"
     
-    # ---- Guidelines trimmed to only 800 characters (to avoid token limits) ----
-    guidelines_section = ""
-    if st.session_state.guidelines_text:
-        trimmed = st.session_state.guidelines_text[:800]  # Keep it short and fast
-        guidelines_section = f"Guidelines:\n{trimmed}"
+    # ---- Use the embedded guidelines (trimmed to 800 chars for speed) ----
+    guidelines_text = st.session_state.guidelines_text
+    trimmed = guidelines_text[:800] if guidelines_text else ""
+    guidelines_section = f"Guidelines:\n{trimmed}" if trimmed else ""
     
     user_question = st.text_area(get_text("ai_question_label"), height=100,
                                  placeholder="Example: Is Emily Clark ready to go home? or What is the discharge policy? or List patient rights")
@@ -442,7 +461,7 @@ def ai_diagnostic():
             st.warning("Please enter a question.")
             return
         
-        # ---- Handle discharge questions locally (fast) ----
+        # ---- Handle discharge questions locally ----
         patient_name_match = None
         for p in st.session_state.patients:
             if p["name"].lower() in user_question.lower():
@@ -466,9 +485,8 @@ def ai_diagnostic():
                     st.warning(f"❌ {patient_name_match} is not ready. Reasons: {', '.join(reasons)}.")
                 return
         
-        # ---- General question: call Groq with direct timeout ----
+        # ---- General question: call Groq ----
         with st.spinner(get_text("ai_thinking")):
-            # Build the prompt (short and focused)
             prompt = f"""You are a hospital assistant. Answer the user's question based ONLY on the data below.
 Provide a clear, structured summary (use bullet points if appropriate). Include specific details from the guidelines if the question asks about policies.
 
@@ -479,27 +497,20 @@ Question: {user_question}
 
 Answer:"""
             
-            # Print prompt length to logs for debugging
-            print(f"Prompt length: {len(prompt)} characters")
-            
             try:
-                # Direct call with timeout (in seconds)
                 completion = groq_client.chat.completions.create(
                     model="llama-3.1-8b-instant",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.2,
                     max_tokens=250,
-                    timeout=12  # timeout after 12 seconds
+                    timeout=12
                 )
                 response = completion.choices[0].message.content.strip()
                 st.markdown(f"### {get_text('ai_response_title')}")
                 st.markdown(response)
             except Exception as e:
-                # Catch any error (timeout, rate limit, etc.)
                 st.error(f"❌ AI service error: {str(e)}")
-                st.info("💡 Please try a shorter question or ensure your Groq API key is valid and has sufficient quota.")
-                if st.session_state.guidelines_text:
-                    st.info("🔹 As a fallback, you can refer to the uploaded guidelines manually. The AI failed to process them due to timeout.")
+                st.info("💡 Please try a shorter question or ensure your Groq API key is valid.")
 
 # ========== LOGIN PAGE ==========
 def login_page():
@@ -547,8 +558,7 @@ def main_dashboard():
             This is a comprehensive, multi-specialty hospital management solution with integrated Electronic Medical Records, real-time operations, and enterprise modules.
             The system includes patient registration and EMR, billing and revenue cycle management, pharmacy management with stock alerts, laboratory integration with test ordering and results tracking, radiology and imaging scheduling, inventory control, and enterprise reporting.
             The AI Diagnostic Assistant allows you to ask clinical or operational questions and get insights based on actual hospital data.
-            You can also upload hospital guidelines in Word format and the AI will incorporate them into its answers.
-            The software supports multi-language interfaces and is built with a modern, user-friendly design.
+            The software includes a full set of hospital guidelines to answer policy-related questions.
             This software was built by Gesner Deslandes, engineer in chief at GlobalInternet.py.
             """
             with st.spinner("Generating voice explanation..."):

@@ -10,6 +10,12 @@ import tempfile
 import os
 from gtts import gTTS
 
+# ========== SUPABASE CLIENT ==========
+try:
+    from supabase import create_client, Client
+except ImportError:
+    Client = None
+
 # ========== PAGE CONFIGURATION ==========
 st.set_page_config(
     page_title="Hospital Management System - built by Gesner Deslandes",
@@ -80,7 +86,123 @@ def generate_audio(text):
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
-# ========== INITIALIZE SESSION STATE ==========
+# ========== GROQ CLIENT ==========
+if "GROQ_API_KEY" not in st.secrets:
+    st.error("⚠️ Missing Groq API key. Add `GROQ_API_KEY` to your Streamlit secrets.")
+    st.stop()
+groq_client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+
+# ========== SUPABASE CLIENT INIT ==========
+def get_supabase():
+    supabase_url = st.secrets.get("SUPABASE_URL", "")
+    supabase_key = st.secrets.get("SUPABASE_KEY", "")
+    if supabase_url and supabase_key and Client:
+        try:
+            return create_client(supabase_url, supabase_key)
+        except Exception:
+            return None
+    return None
+
+supabase = get_supabase()
+SUPABASE_AVAILABLE = supabase is not None
+
+# ========== DATA FUNCTIONS ==========
+def fetch_data(table_name):
+    if not SUPABASE_AVAILABLE:
+        return []
+    try:
+        response = supabase.table(table_name).select("*").execute()
+        return response.data if response.data else []
+    except Exception:
+        return []
+
+def insert_data(table_name, data):
+    if not SUPABASE_AVAILABLE:
+        return None
+    try:
+        response = supabase.table(table_name).insert(data).execute()
+        return response.data[0] if response.data else None
+    except Exception:
+        return None
+
+def update_data(table_name, id_col, id_val, data):
+    if not SUPABASE_AVAILABLE:
+        return None
+    try:
+        response = supabase.table(table_name).update(data).eq(id_col, id_val).execute()
+        return response.data[0] if response.data else None
+    except Exception:
+        return None
+
+def delete_data(table_name, id_col, id_val):
+    if not SUPABASE_AVAILABLE:
+        return
+    try:
+        supabase.table(table_name).delete().eq(id_col, id_val).execute()
+    except Exception:
+        pass
+
+def load_guidelines():
+    if not SUPABASE_AVAILABLE:
+        return ""
+    try:
+        res = supabase.table("guidelines").select("content").eq("id", 1).execute()
+        if res.data:
+            return res.data[0].get("content", "")
+    except Exception:
+        pass
+    return ""
+
+def save_guidelines(content):
+    if not SUPABASE_AVAILABLE:
+        return
+    try:
+        supabase.table("guidelines").upsert({"id": 1, "content": content}).execute()
+    except Exception:
+        pass
+
+# ========== INITIALIZE SESSION STATE (with Supabase sync) ==========
+def refresh_patients():
+    if SUPABASE_AVAILABLE:
+        st.session_state.patients = fetch_data("patients")
+    else:
+        # default data
+        if "patients" not in st.session_state:
+            st.session_state.patients = [
+                {"mrn": "HOSP-1001", "name": "Emily Clark", "age": 34, "gender": "Female", "phone": "555-0101", "address": "123 Main St", "last_visit": "2026-04-20"},
+                {"mrn": "HOSP-1002", "name": "James Brown", "age": 58, "gender": "Male", "phone": "555-0102", "address": "456 Oak Ave", "last_visit": "2026-04-19"},
+                {"mrn": "HOSP-1003", "name": "Sophia Lee", "age": 22, "gender": "Female", "phone": "555-0103", "address": "789 Pine Rd", "last_visit": "2026-04-18"}
+            ]
+
+def refresh_invoices():
+    if SUPABASE_AVAILABLE:
+        st.session_state.invoices = fetch_data("invoices")
+    else:
+        if "invoices" not in st.session_state:
+            st.session_state.invoices = [
+                {"invoice": "INV-101", "patient": "Emily Clark", "amount": 450, "status": "Paid"},
+                {"invoice": "INV-102", "patient": "James Brown", "amount": 1200, "status": "Pending"},
+                {"invoice": "INV-103", "patient": "Sophia Lee", "amount": 780, "status": "Paid"}
+            ]
+
+def refresh_lab_orders():
+    if SUPABASE_AVAILABLE:
+        st.session_state.lab_orders = fetch_data("lab_orders")
+    else:
+        if "lab_orders" not in st.session_state:
+            st.session_state.lab_orders = [
+                {"patient": "Emily Clark", "test": "CBC", "status": "Completed"},
+                {"patient": "James Brown", "test": "Lipid Panel", "status": "Pending"}
+            ]
+
+def refresh_guidelines():
+    if SUPABASE_AVAILABLE:
+        st.session_state.guidelines_text = load_guidelines()
+    else:
+        if "guidelines_text" not in st.session_state:
+            st.session_state.guidelines_text = ""
+
+# Initialize all data
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "username" not in st.session_state:
@@ -89,23 +211,12 @@ if "role" not in st.session_state:
     st.session_state.role = "Admin"
 if "language" not in st.session_state:
     st.session_state.language = "en"
-if "patients" not in st.session_state:
-    st.session_state.patients = [
-        {"mrn": "HOSP-1001", "name": "Emily Clark", "age": 34, "gender": "Female", "phone": "555-0101", "address": "123 Main St", "last_visit": "2026-04-20"},
-        {"mrn": "HOSP-1002", "name": "James Brown", "age": 58, "gender": "Male", "phone": "555-0102", "address": "456 Oak Ave", "last_visit": "2026-04-19"},
-        {"mrn": "HOSP-1003", "name": "Sophia Lee", "age": 22, "gender": "Female", "phone": "555-0103", "address": "789 Pine Rd", "last_visit": "2026-04-18"}
-    ]
-if "invoices" not in st.session_state:
-    st.session_state.invoices = [
-        {"invoice": "INV-101", "patient": "Emily Clark", "amount": 450, "status": "Paid"},
-        {"invoice": "INV-102", "patient": "James Brown", "amount": 1200, "status": "Pending"},
-        {"invoice": "INV-103", "patient": "Sophia Lee", "amount": 780, "status": "Paid"}
-    ]
-if "lab_orders" not in st.session_state:
-    st.session_state.lab_orders = [
-        {"patient": "Emily Clark", "test": "CBC", "status": "Completed"},
-        {"patient": "James Brown", "test": "Lipid Panel", "status": "Pending"}
-    ]
+
+refresh_patients()
+refresh_invoices()
+refresh_lab_orders()
+refresh_guidelines()
+
 if "hospital_stats" not in st.session_state:
     st.session_state.hospital_stats = {
         "total_patients_today": random.randint(120, 250),
@@ -113,14 +224,6 @@ if "hospital_stats" not in st.session_state:
         "today_revenue": random.randint(15000, 35000),
         "lab_tests_pending": random.randint(10, 40)
     }
-if "guidelines_text" not in st.session_state:
-    st.session_state.guidelines_text = ""
-
-# ========== GROQ CLIENT ==========
-if "GROQ_API_KEY" not in st.secrets:
-    st.error("⚠️ Missing Groq API key. Add `GROQ_API_KEY` to your Streamlit secrets.")
-    st.stop()
-groq_client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 # ========== TRANSLATION (ENGLISH ONLY FOR BREVITY) ==========
 lang_en = {
@@ -292,11 +395,16 @@ def ai_diagnostic():
         try:
             doc = Document(io.BytesIO(uploaded_file.read()))
             full_text = "\n".join([para.text for para in doc.paragraphs])
+            if SUPABASE_AVAILABLE:
+                save_guidelines(full_text)
             st.session_state.guidelines_text = full_text
             st.success(get_text("guidelines_uploaded").format(filename=uploaded_file.name))
+            st.rerun()
         except Exception as e:
             st.error(f"Error reading Word document: {e}")
     if st.session_state.guidelines_text and st.button(get_text("clear_guidelines")):
+        if SUPABASE_AVAILABLE:
+            save_guidelines("")
         st.session_state.guidelines_text = ""
         st.success(get_text("guidelines_cleared"))
         st.rerun()
@@ -506,7 +614,7 @@ def main_dashboard():
         """, unsafe_allow_html=True)
         st.info(get_text("youtube_info"))
     
-    # Tab 1: Overview
+    # Tab 1: Overview (unchanged)
     with tabs[1]:
         stats = st.session_state.hospital_stats
         col1, col2, col3, col4 = st.columns(4)
@@ -532,7 +640,7 @@ def main_dashboard():
                                        get_text("patient_col"): [87, 42, 23, 15]})
             st.bar_chart(dept_stats.set_index("Department"))
     
-    # Tab 2: Patient Management (unchanged)
+    # Tab 2: Patient Management (modified for Supabase)
     with tabs[2]:
         st.subheader(get_text("patient_registration"))
         with st.expander(get_text("register_new")):
@@ -555,8 +663,16 @@ def main_dashboard():
                     "address": address,
                     "last_visit": datetime.date.today().isoformat()
                 }
-                st.session_state.patients.append(new_patient)
-                st.success(get_text("register_success").format(name=name, mrn=mrn))
+                if SUPABASE_AVAILABLE:
+                    inserted = insert_data("patients", new_patient)
+                    if inserted:
+                        refresh_patients()
+                        st.success(get_text("register_success").format(name=name, mrn=mrn))
+                    else:
+                        st.error("Failed to save to Supabase. Check your connection.")
+                else:
+                    st.session_state.patients.append(new_patient)
+                    st.success(get_text("register_success").format(name=name, mrn=mrn))
                 st.rerun()
         st.markdown("---")
         st.subheader(get_text("recent_patients"))
@@ -567,7 +683,7 @@ def main_dashboard():
             st.info("No patients registered yet. Use the form above to add patients.")
         st.caption(get_text("emr_note"))
     
-    # Tab 3: Billing (unchanged)
+    # Tab 3: Billing (modified for Supabase)
     with tabs[3]:
         st.subheader(get_text("billing_title"))
         col1, col2 = st.columns(2)
@@ -577,8 +693,18 @@ def main_dashboard():
             amount = st.number_input(get_text("bill_amount"), min_value=0, step=10)
             if st.button(get_text("generate_bill")):
                 inv_num = f"INV-{random.randint(200,999)}"
-                st.session_state.invoices.append({"invoice": inv_num, "patient": bill_patient, "amount": amount, "status": "Pending"})
-                st.success(get_text("bill_success").format(patient=bill_patient, amount=amount))
+                new_invoice = {"invoice": inv_num, "patient": bill_patient, "amount": amount, "status": "Pending"}
+                if SUPABASE_AVAILABLE:
+                    inserted = insert_data("invoices", new_invoice)
+                    if inserted:
+                        refresh_invoices()
+                        st.success(get_text("bill_success").format(patient=bill_patient, amount=amount))
+                    else:
+                        st.error("Failed to save invoice to Supabase.")
+                else:
+                    st.session_state.invoices.append(new_invoice)
+                    st.success(get_text("bill_success").format(patient=bill_patient, amount=amount))
+                st.rerun()
         with col2:
             st.subheader(get_text("recent_invoices"))
             if st.session_state.invoices:
@@ -586,7 +712,7 @@ def main_dashboard():
             else:
                 st.info("No invoices yet.")
     
-    # Tab 4: Pharmacy (unchanged)
+    # Tab 4: Pharmacy (unchanged – no Supabase needed)
     with tabs[4]:
         st.subheader(get_text("pharmacy_title"))
         col1, col2 = st.columns(2)
@@ -602,15 +728,25 @@ def main_dashboard():
                                      get_text("reorder_level_col"): [100, 50, 30]})
             st.dataframe(stock_df, use_container_width=True)
     
-    # Tab 5: Laboratory (unchanged)
+    # Tab 5: Laboratory (modified for Supabase)
     with tabs[5]:
         st.subheader(get_text("lab_title"))
         test = st.selectbox(get_text("order_lab_test"), ["Complete Blood Count", "Lipid Panel", "Liver Function Test", "Urinalysis"])
         patient_names = [p["name"] for p in st.session_state.patients] if st.session_state.patients else ["No patients"]
         patient_test = st.selectbox(get_text("patient_mrn"), patient_names)
         if st.button(get_text("order_test_btn")):
-            st.session_state.lab_orders.append({"patient": patient_test, "test": test, "status": "Pending"})
-            st.warning(get_text("order_test_msg").format(test=test, patient=patient_test))
+            new_order = {"patient": patient_test, "test": test, "status": "Pending"}
+            if SUPABASE_AVAILABLE:
+                inserted = insert_data("lab_orders", new_order)
+                if inserted:
+                    refresh_lab_orders()
+                    st.warning(get_text("order_test_msg").format(test=test, patient=patient_test))
+                else:
+                    st.error("Failed to save lab order to Supabase.")
+            else:
+                st.session_state.lab_orders.append(new_order)
+                st.warning(get_text("order_test_msg").format(test=test, patient=patient_test))
+            st.rerun()
         st.markdown("---")
         st.subheader(get_text("recent_lab_results"))
         if st.session_state.lab_orders:
@@ -645,7 +781,7 @@ def main_dashboard():
                                   get_text("revenue_col"): [12500, 14800, 13200, 16700, 18900]})
         st.line_chart(df_report.set_index(get_text("day_col")))
     
-    # Tab 9: AI Diagnostic Assistant
+    # Tab 9: AI Diagnostic Assistant (unchanged)
     with tabs[9]:
         ai_diagnostic()
 

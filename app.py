@@ -516,7 +516,7 @@ Answer:"""
                 st.error(f"❌ AI service error: {str(e)}")
                 st.info("💡 Please try a shorter question or ensure your Groq API key is valid.")
 
-# ========== LOGIN PAGE ==========
+# ========== UPDATED LOGIN PAGE ==========
 def login_page():
     col_lang1, col_lang2, col_lang3 = st.columns([1,1,1])
     with col_lang2:
@@ -536,13 +536,32 @@ def login_page():
             role_input = st.selectbox(get_text("role"), ["Admin", "Doctor", "Nurse", "Billing Staff"], key="login_role")
             submit = st.form_submit_button(get_text("sign_in"), width="stretch")
             if submit:
-                if username_input == "Gesner" and password_input == "20082010" and role_input == "Admin":
+                # Trim whitespace from inputs
+                username_clean = username_input.strip()
+                password_clean = password_input.strip()
+                role_clean = role_input.strip()
+                
+                # Debug: print to logs (will appear in Streamlit Cloud logs)
+                print(f"Login attempt: username='{username_clean}', password='{password_clean}', role='{role_clean}'")
+                
+                # Check credentials
+                if (username_clean == "Gesner" and 
+                    password_clean == "20082010" and 
+                    role_clean == "Admin"):
                     st.session_state.authenticated = True
-                    st.session_state.username = username_input
-                    st.session_state.role = role_input
+                    st.session_state.username = username_clean
+                    st.session_state.role = role_clean
                     st.rerun()
                 else:
-                    st.error(get_text("invalid_creds"))
+                    # Detailed error message
+                    error_msg = get_text("invalid_creds")
+                    if username_clean != "Gesner":
+                        error_msg += f" (Username: '{username_clean}' is not 'Gesner')"
+                    elif password_clean != "20082010":
+                        error_msg += f" (Password: '{password_clean}' does not match '20082010')"
+                    elif role_clean != "Admin":
+                        error_msg += f" (Role: '{role_clean}' is not 'Admin')"
+                    st.error(error_msg)
         st.markdown(f"""
         <div style="text-align: center; margin-top: 2rem;">
             <p>🩺 <strong>{get_text('demo_note')}</strong></p>

@@ -433,7 +433,7 @@ def get_patient_status(patient_name):
         "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
     }
 
-# ========== AI DIAGNOSTIC ==========
+# ========== AI DIAGNOSTIC (UPDATED) ==========
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
@@ -442,17 +442,38 @@ def ai_diagnostic():
     st.markdown(get_text("guidelines_note"), unsafe_allow_html=True)
     st.markdown("---")
     
-    # ---- Build a short summary of hospital data ----
+    # ---- Ensure at least some default patient data exists ----
+    if not st.session_state.patients:
+        # If Supabase is empty, fall back to default patients for demo
+        st.session_state.patients = [
+            {"mrn": "HOSP-1001", "name": "Emily Clark", "age": 34, "gender": "Female", "phone": "555-0101", "address": "123 Main St", "last_visit": "2026-04-20"},
+            {"mrn": "HOSP-1002", "name": "James Brown", "age": 58, "gender": "Male", "phone": "555-0102", "address": "456 Oak Ave", "last_visit": "2026-04-19"},
+            {"mrn": "HOSP-1003", "name": "Sophia Lee", "age": 22, "gender": "Female", "phone": "555-0103", "address": "789 Pine Rd", "last_visit": "2026-04-18"}
+        ]
+        # Also add them to Supabase if available, so they persist
+        if SUPABASE_AVAILABLE:
+            for p in st.session_state.patients:
+                try:
+                    supabase.table("patients").upsert(p).execute()
+                except Exception:
+                    pass
+    
+    # ---- Build summary with patient info (if any) ----
     stats = st.session_state.hospital_stats
     patient_count = len(st.session_state.patients)
+    patient_list = "\n".join([f"- {p['name']} (MRN: {p['mrn']}, Age: {p['age']}, Last visit: {p['last_visit']})" for p in st.session_state.patients[:5]])
     first_patient = st.session_state.patients[0] if st.session_state.patients else None
     patient_info = f"{first_patient['name']} (MRN: {first_patient['mrn']})" if first_patient else "None"
     
     hospital_summary = f"Patients: {patient_count}, Today's visits: {stats['total_patients_today']}, Revenue: ${stats['today_revenue']}, Lab pending: {stats['lab_tests_pending']}"
     if first_patient:
         hospital_summary += f", Sample patient: {patient_info}"
+    if st.session_state.patients:
+        hospital_summary += f"\nPatient list:\n{patient_list}"
+    else:
+        hospital_summary += "\nNo patient data available."
     
-    # ---- Use the embedded guidelines (trimmed to 800 chars for speed) ----
+    # ---- Use embedded guidelines ----
     guidelines_text = st.session_state.guidelines_text
     trimmed = guidelines_text[:800] if guidelines_text else ""
     guidelines_section = f"Guidelines:\n{trimmed}" if trimmed else ""
@@ -465,12 +486,13 @@ def ai_diagnostic():
             st.warning("Please enter a question.")
             return
         
-        # ---- Handle discharge questions locally ----
+        # ---- Handle discharge questions locally (if patient exists) ----
         patient_name_match = None
-        for p in st.session_state.patients:
-            if p["name"].lower() in user_question.lower():
-                patient_name_match = p["name"]
-                break
+        if st.session_state.patients:
+            for p in st.session_state.patients:
+                if p["name"].lower() in user_question.lower():
+                    patient_name_match = p["name"]
+                    break
         
         if patient_name_match and any(word in user_question.lower() for word in ["discharge", "go home", "ready"]):
             status = get_patient_status(patient_name_match)
@@ -488,6 +510,15 @@ def ai_diagnostic():
                         reasons.append("seen today, observation recommended")
                     st.warning(f"❌ {patient_name_match} is not ready. Reasons: {', '.join(reasons)}.")
                 return
+            else:
+                st.warning(f"Patient '{patient_name_match}' not found in the system.")
+                return
+        
+        # ---- If the question is about a patient but doesn't match discharge keywords, let AI handle it ----
+        # But we can also add a fallback if patient not found
+        if any(name.lower() in user_question.lower() for p in st.session_state.patients for name in [p["name"]]) and not st.session_state.patients:
+            st.warning("No patient data is available. Please add patients first.")
+            return
         
         # ---- General question: call Groq ----
         with st.spinner(get_text("ai_thinking")):
@@ -516,7 +547,7 @@ Answer:"""
                 st.error(f"❌ AI service error: {str(e)}")
                 st.info("💡 Please try a shorter question or ensure your Groq API key is valid.")
 
-# ========== UPDATED LOGIN PAGE ==========
+# ========== LOGIN PAGE ==========
 def login_page():
     col_lang1, col_lang2, col_lang3 = st.columns([1,1,1])
     with col_lang2:
@@ -541,7 +572,7 @@ def login_page():
                 password_clean = password_input.strip()
                 role_clean = role_input.strip()
                 
-                # Debug: print to logs (will appear in Streamlit Cloud logs)
+                # Debug: print to logs
                 print(f"Login attempt: username='{username_clean}', password='{password_clean}', role='{role_clean}'")
                 
                 # Check credentials

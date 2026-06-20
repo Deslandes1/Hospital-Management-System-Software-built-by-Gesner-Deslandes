@@ -433,7 +433,7 @@ def get_patient_status(patient_name):
         "reason": f"Labs completed: {all_labs_completed}, Bills paid: {all_bills_paid}, Days since last visit: {days_since_last}"
     }
 
-# ========== AI DIAGNOSTIC (UPDATED) ==========
+# ========== AI DIAGNOSTIC (UPDATED with 2000-char trim) ==========
 def ai_diagnostic():
     st.subheader(get_text("ai_diagnostic_title"))
     st.markdown(get_text("ai_diagnostic_desc"))
@@ -473,9 +473,9 @@ def ai_diagnostic():
     else:
         hospital_summary += "\nNo patient data available."
     
-    # ---- Use embedded guidelines ----
+    # ---- Use embedded guidelines (trimmed to 2000 chars to include discharge criteria) ----
     guidelines_text = st.session_state.guidelines_text
-    trimmed = guidelines_text[:800] if guidelines_text else ""
+    trimmed = guidelines_text[:2000] if guidelines_text else ""  # <-- Increased from 800 to 2000
     guidelines_section = f"Guidelines:\n{trimmed}" if trimmed else ""
     
     user_question = st.text_area(get_text("ai_question_label"), height=100,
